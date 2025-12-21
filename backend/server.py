@@ -449,7 +449,8 @@ async def create_journal_entry(entry_input: JournalEntryCreate):
     
     doc = entry.model_dump()
     await db.journal.insert_one(doc)
-    return doc
+    # Return the document without MongoDB's _id field
+    return {k: v for k, v in doc.items() if k != '_id'}
 
 @api_router.patch("/journal/{entry_id}/settle")
 async def settle_bet(entry_id: str, settle_request: SettleBetRequest):
