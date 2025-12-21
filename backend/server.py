@@ -367,6 +367,13 @@ async def get_teams():
         })
     return teams
 
+@api_router.post("/refresh-data")
+async def refresh_data():
+    """Regenerate all fixtures and team data"""
+    global MOCK_GAMES, EPL_TEAMS
+    MOCK_GAMES, EPL_TEAMS = generate_fixtures()
+    return {"message": "Data refreshed", "games": len(MOCK_GAMES), "teams": len(EPL_TEAMS)}
+
 # ---- Games ----
 @api_router.get("/games")
 async def get_games():
