@@ -304,7 +304,7 @@ async def get_models():
     
     return models
 
-@api_router.post("/models")
+@api_router.post("/models", status_code=201)
 async def create_model(model_input: BettingModelCreate):
     model = BettingModel(
         name=model_input.name,
