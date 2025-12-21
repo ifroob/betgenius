@@ -125,30 +125,138 @@ class JournalEntryCreate(BaseModel):
 class SettleBetRequest(BaseModel):
     result: str  # "home", "draw", "away"
 
-# ============ MOCK DATA ============
-EPL_TEAMS = {
-    "Arsenal": {"short": "ARS", "offense": 85, "defense": 82, "form": 88, "injury": 5},
-    "Manchester City": {"short": "MCI", "offense": 92, "defense": 88, "form": 85, "injury": 10},
-    "Liverpool": {"short": "LIV", "offense": 90, "defense": 85, "form": 90, "injury": 8},
-    "Chelsea": {"short": "CHE", "offense": 78, "defense": 75, "form": 70, "injury": 15},
-    "Manchester United": {"short": "MUN", "offense": 75, "defense": 72, "form": 65, "injury": 12},
-    "Tottenham": {"short": "TOT", "offense": 80, "defense": 74, "form": 75, "injury": 8},
-    "Newcastle": {"short": "NEW", "offense": 76, "defense": 80, "form": 82, "injury": 6},
-    "Brighton": {"short": "BHA", "offense": 72, "defense": 70, "form": 78, "injury": 4},
-    "Aston Villa": {"short": "AVL", "offense": 74, "defense": 73, "form": 80, "injury": 7},
-    "West Ham": {"short": "WHU", "offense": 68, "defense": 65, "form": 60, "injury": 18},
+# ============ DYNAMIC DATA GENERATOR ============
+import random
+from datetime import timedelta
+
+EPL_TEAMS_BASE = {
+    "Arsenal": {"short": "ARS", "base_offense": 85, "base_defense": 82},
+    "Manchester City": {"short": "MCI", "base_offense": 92, "base_defense": 88},
+    "Liverpool": {"short": "LIV", "base_offense": 90, "base_defense": 85},
+    "Chelsea": {"short": "CHE", "base_offense": 78, "base_defense": 75},
+    "Manchester United": {"short": "MUN", "base_offense": 75, "base_defense": 72},
+    "Tottenham": {"short": "TOT", "base_offense": 80, "base_defense": 74},
+    "Newcastle": {"short": "NEW", "base_offense": 76, "base_defense": 80},
+    "Brighton": {"short": "BHA", "base_offense": 72, "base_defense": 70},
+    "Aston Villa": {"short": "AVL", "base_offense": 74, "base_defense": 73},
+    "West Ham": {"short": "WHU", "base_offense": 68, "base_defense": 65},
+    "Fulham": {"short": "FUL", "base_offense": 70, "base_defense": 68},
+    "Brentford": {"short": "BRE", "base_offense": 71, "base_defense": 69},
+    "Crystal Palace": {"short": "CRY", "base_offense": 66, "base_defense": 70},
+    "Wolves": {"short": "WOL", "base_offense": 65, "base_defense": 72},
+    "Bournemouth": {"short": "BOU", "base_offense": 67, "base_defense": 64},
+    "Nottingham Forest": {"short": "NFO", "base_offense": 64, "base_defense": 71},
+    "Everton": {"short": "EVE", "base_offense": 62, "base_defense": 68},
+    "Leicester": {"short": "LEI", "base_offense": 69, "base_defense": 63},
+    "Ipswich": {"short": "IPS", "base_offense": 58, "base_defense": 60},
+    "Southampton": {"short": "SOU", "base_offense": 60, "base_defense": 58},
 }
 
-MOCK_GAMES = [
-    {"home": "Arsenal", "away": "Manchester City", "date": "2024-12-21 15:00", "h_odds": 2.40, "d_odds": 3.30, "a_odds": 2.85},
-    {"home": "Liverpool", "away": "Chelsea", "date": "2024-12-21 17:30", "h_odds": 1.55, "d_odds": 4.20, "a_odds": 5.50},
-    {"home": "Manchester United", "away": "Tottenham", "date": "2024-12-22 14:00", "h_odds": 2.60, "d_odds": 3.40, "a_odds": 2.70},
-    {"home": "Newcastle", "away": "Brighton", "date": "2024-12-22 16:30", "h_odds": 1.85, "d_odds": 3.60, "a_odds": 4.20},
-    {"home": "Aston Villa", "away": "West Ham", "date": "2024-12-23 20:00", "h_odds": 1.70, "d_odds": 3.80, "a_odds": 4.80},
-    {"home": "Chelsea", "away": "Arsenal", "date": "2024-12-26 12:30", "h_odds": 3.10, "d_odds": 3.40, "a_odds": 2.25},
-    {"home": "Manchester City", "away": "Liverpool", "date": "2024-12-26 17:30", "h_odds": 1.95, "d_odds": 3.50, "a_odds": 3.80},
-    {"home": "Tottenham", "away": "Newcastle", "date": "2024-12-28 15:00", "h_odds": 2.10, "d_odds": 3.50, "a_odds": 3.40},
-]
+def get_randomized_teams():
+    """Generate team stats with random variations for form and injuries"""
+    teams = {}
+    for name, base in EPL_TEAMS_BASE.items():
+        # Randomize form (can swing wildly based on recent results)
+        form_variation = random.randint(-15, 15)
+        form = max(40, min(95, base["base_offense"] + form_variation))
+        
+        # Randomize injury impact (0-25%)
+        injury = random.randint(0, 25)
+        
+        # Add slight variation to offense/defense
+        offense = max(50, min(95, base["base_offense"] + random.randint(-5, 5)))
+        defense = max(50, min(95, base["base_defense"] + random.randint(-5, 5)))
+        
+        teams[name] = {
+            "short": base["short"],
+            "offense": offense,
+            "defense": defense,
+            "form": form,
+            "injury": injury
+        }
+    return teams
+
+def generate_odds(home_strength: float, away_strength: float) -> tuple:
+    """Generate realistic odds based on team strengths with randomness"""
+    diff = home_strength - away_strength + random.uniform(-10, 10)  # Home advantage + noise
+    
+    # Base probabilities with variation
+    if diff > 15:
+        home_prob = random.uniform(0.55, 0.70)
+        draw_prob = random.uniform(0.18, 0.25)
+    elif diff > 5:
+        home_prob = random.uniform(0.42, 0.55)
+        draw_prob = random.uniform(0.22, 0.30)
+    elif diff > -5:
+        home_prob = random.uniform(0.32, 0.42)
+        draw_prob = random.uniform(0.28, 0.35)
+    elif diff > -15:
+        home_prob = random.uniform(0.25, 0.35)
+        draw_prob = random.uniform(0.25, 0.32)
+    else:
+        home_prob = random.uniform(0.15, 0.28)
+        draw_prob = random.uniform(0.20, 0.28)
+    
+    away_prob = 1 - home_prob - draw_prob
+    
+    # Convert to decimal odds with bookmaker margin (5-8%)
+    margin = random.uniform(1.05, 1.08)
+    h_odds = round(margin / home_prob, 2)
+    d_odds = round(margin / draw_prob, 2)
+    a_odds = round(margin / away_prob, 2)
+    
+    return h_odds, d_odds, a_odds
+
+def generate_fixtures():
+    """Generate random EPL fixtures with dynamic odds"""
+    team_names = list(EPL_TEAMS_BASE.keys())
+    random.shuffle(team_names)
+    
+    fixtures = []
+    teams = get_randomized_teams()
+    
+    # Generate 8 random fixtures
+    used_teams = set()
+    base_date = datetime.now(timezone.utc)
+    
+    kickoff_times = ["12:30", "15:00", "17:30", "20:00"]
+    
+    for i in range(8):
+        # Pick two teams that haven't played yet
+        available = [t for t in team_names if t not in used_teams]
+        if len(available) < 2:
+            used_teams.clear()
+            available = team_names.copy()
+        
+        random.shuffle(available)
+        home_team = available[0]
+        away_team = available[1]
+        used_teams.add(home_team)
+        used_teams.add(away_team)
+        
+        # Generate match date (spread over next 7 days)
+        match_date = base_date + timedelta(days=i // 2, hours=random.randint(0, 8))
+        kickoff = random.choice(kickoff_times)
+        date_str = f"{match_date.strftime('%Y-%m-%d')} {kickoff}"
+        
+        # Generate odds based on team strengths
+        home_strength = teams[home_team]["offense"] + teams[home_team]["form"] - teams[home_team]["injury"]
+        away_strength = teams[away_team]["offense"] + teams[away_team]["form"] - teams[away_team]["injury"]
+        h_odds, d_odds, a_odds = generate_odds(home_strength, away_strength)
+        
+        fixtures.append({
+            "home": home_team,
+            "away": away_team,
+            "date": date_str,
+            "h_odds": h_odds,
+            "d_odds": d_odds,
+            "a_odds": a_odds
+        })
+    
+    return fixtures, teams
+
+# Generate fresh data on each server restart
+MOCK_GAMES, EPL_TEAMS = generate_fixtures()
 
 PRESET_MODELS = [
     {
