@@ -411,7 +411,7 @@ async def get_journal():
     entries = await db.journal.find({}, {"_id": 0}).to_list(100)
     return entries
 
-@api_router.post("/journal")
+@api_router.post("/journal", status_code=201)
 async def create_journal_entry(entry_input: JournalEntryCreate):
     """Add a pick to the journal with stake and odds"""
     # Parse pick_id to get game info
