@@ -183,6 +183,21 @@ function App() {
     }
   }, []);
 
+  // Refresh fixtures with new random data
+  const refreshFixtures = async () => {
+    setLoading(true);
+    try {
+      await axios.post(`${API}/refresh-data`);
+      await fetchData();
+      setPicks([]);
+      setSelectedModel(null);
+      toast.success("Fixtures refreshed with new data!");
+    } catch (err) {
+      toast.error("Failed to refresh fixtures");
+    }
+    setLoading(false);
+  };
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
