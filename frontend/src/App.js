@@ -10,6 +10,7 @@ import {
   Plus,
   Trash2,
   ChevronRight,
+  ChevronDown,
   Trophy,
   AlertCircle,
   Clock,
@@ -17,6 +18,7 @@ import {
   Percent,
   Zap,
   RefreshCw,
+  Info,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -132,6 +134,57 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+const FactorBreakdown = ({ breakdown, teamName }) => {
+  if (!breakdown) return null;
+  
+  const factorNames = {
+    team_offense: "Offense",
+    team_defense: "Defense",
+    recent_form: "Form",
+    injuries: "Injuries",
+    home_advantage: "Home/Away",
+    head_to_head: "H2H Record",
+    rest_days: "Rest",
+    travel_distance: "Travel",
+    referee_influence: "Referee",
+    weather_conditions: "Weather",
+    motivation_level: "Motivation"
+  };
+  
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">{teamName}</p>
+      {Object.entries(breakdown).map(([key, data]) => {
+        const contribution = data.contribution || 0;
+        const weight = data.weight || 0;
+        const isNegative = contribution < 0;
+        const barWidth = Math.min(Math.abs(contribution) * 25, 100);
+        
+        return (
+          <div key={key} className="space-y-1">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-zinc-400">{factorNames[key] || key}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-500 font-mono">{weight.toFixed(0)}%</span>
+                <span className={`font-mono font-semibold ${isNegative ? 'text-red-400' : 'text-green-400'}`}>
+                  {contribution >= 0 ? '+' : ''}{contribution.toFixed(2)}
+                </span>
+              </div>
+            </div>
+            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div 
+                className={`h-full ${isNegative ? 'bg-red-500/60' : 'bg-green-500/60'}`}
+                style={{ width: `${barWidth}%` }}
+              />
+            </div>
+            <p className="text-xs text-zinc-600 italic">{data.description}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // ============ MAIN APP ============
 
 function App() {
@@ -147,12 +200,21 @@ function App() {
   // Model builder state
   const [newModelName, setNewModelName] = useState("");
   const [weights, setWeights] = useState({
-    team_offense: 20,
-    team_defense: 20,
-    recent_form: 20,
-    injuries: 20,
-    home_advantage: 20
+    team_offense: 12,
+    team_defense: 12,
+    recent_form: 12,
+    injuries: 10,
+    home_advantage: 10,
+    head_to_head: 10,
+    rest_days: 8,
+    travel_distance: 8,
+    referee_influence: 8,
+    weather_conditions: 5,
+    motivation_level: 5
   });
+  
+  // Expanded pick reasoning state
+  const [expandedPick, setExpandedPick] = useState(null);
 
   // Dialog states
   const [showAddBetDialog, setShowAddBetDialog] = useState(false);
@@ -230,7 +292,11 @@ function App() {
       });
       toast.success("Model created!");
       setNewModelName("");
-      setWeights({ team_offense: 20, team_defense: 20, recent_form: 20, injuries: 20, home_advantage: 20 });
+      setWeights({ 
+        team_offense: 12, team_defense: 12, recent_form: 12, injuries: 10, home_advantage: 10,
+        head_to_head: 10, rest_days: 8, travel_distance: 8, referee_influence: 8,
+        weather_conditions: 5, motivation_level: 5
+      });
       fetchData();
     } catch (err) {
       toast.error("Failed to create model");
@@ -526,6 +592,11 @@ function App() {
                   </div>
 
                   <div className="space-y-5">
+                    <div className="text-xs font-semibold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <div className="h-px flex-1 bg-green-500/30"></div>
+                      Core Factors
+                      <div className="h-px flex-1 bg-green-500/30"></div>
+                    </div>
                     <WeightSlider
                       label="Team Offense"
                       description="Attacking prowess"
@@ -555,6 +626,48 @@ function App() {
                       description="Home/Away factor"
                       value={weights.home_advantage}
                       onChange={(v) => setWeights(w => ({ ...w, home_advantage: v }))}
+                    />
+                    
+                    <div className="text-xs font-semibold text-blue-500 uppercase tracking-wider mt-6 mb-2 flex items-center gap-2">
+                      <div className="h-px flex-1 bg-blue-500/30"></div>
+                      Advanced Factors
+                      <div className="h-px flex-1 bg-blue-500/30"></div>
+                    </div>
+                    <WeightSlider
+                      label="Head-to-Head"
+                      description="Historical matchup record"
+                      value={weights.head_to_head}
+                      onChange={(v) => setWeights(w => ({ ...w, head_to_head: v }))}
+                    />
+                    <WeightSlider
+                      label="Rest Days"
+                      description="Recovery time between matches"
+                      value={weights.rest_days}
+                      onChange={(v) => setWeights(w => ({ ...w, rest_days: v }))}
+                    />
+                    <WeightSlider
+                      label="Travel Distance"
+                      description="Away team fatigue"
+                      value={weights.travel_distance}
+                      onChange={(v) => setWeights(w => ({ ...w, travel_distance: v }))}
+                    />
+                    <WeightSlider
+                      label="Referee Influence"
+                      description="Officiating patterns"
+                      value={weights.referee_influence}
+                      onChange={(v) => setWeights(w => ({ ...w, referee_influence: v }))}
+                    />
+                    <WeightSlider
+                      label="Weather Conditions"
+                      description="Match day conditions"
+                      value={weights.weather_conditions}
+                      onChange={(v) => setWeights(w => ({ ...w, weather_conditions: v }))}
+                    />
+                    <WeightSlider
+                      label="Motivation Level"
+                      description="League position/objectives"
+                      value={weights.motivation_level}
+                      onChange={(v) => setWeights(w => ({ ...w, motivation_level: v }))}
                     />
                   </div>
 
@@ -665,45 +778,120 @@ function App() {
                       </thead>
                       <tbody>
                         {picks.map((pick) => (
-                          <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
-                            <td className="p-4">
-                              <p className="text-sm font-medium text-zinc-200">
-                                {pick.home_team} vs {pick.away_team}
-                              </p>
-                              <p className="text-xs text-zinc-500">{pick.match_date}</p>
-                            </td>
-                            <td className="p-4 text-center">
-                              <span className="font-mono text-sm text-zinc-300">
-                                {pick.projected_home_score} - {pick.projected_away_score}
-                              </span>
-                            </td>
-                            <td className="p-4 text-center">
-                              <OutcomeBadge outcome={pick.predicted_outcome} />
-                            </td>
-                            <td className="p-4 text-center">
-                              <span className="font-mono text-sm text-green-400">
-                                {pick.market_odds.toFixed(2)}
-                              </span>
-                            </td>
-                            <td className="p-4 text-center">
-                              <span className={`font-mono text-sm ${pick.edge_percentage > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
-                              </span>
-                            </td>
-                            <td className="p-4 text-center">
-                              <ConfidenceBadge score={pick.confidence_score} />
-                            </td>
-                            <td className="p-4 text-right">
-                              <Button
-                                size="sm"
-                                className="bg-green-600 hover:bg-green-500 text-white text-xs"
-                                onClick={() => { setSelectedPick(pick); setBetOdds(pick.market_odds.toString()); setShowAddBetDialog(true); }}
-                                data-testid={`add-bet-${pick.id}`}
-                              >
-                                Add to Journal
-                              </Button>
-                            </td>
-                          </tr>
+                          <>
+                            <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
+                              <td className="p-4">
+                                <p className="text-sm font-medium text-zinc-200">
+                                  {pick.home_team} vs {pick.away_team}
+                                </p>
+                                <p className="text-xs text-zinc-500">{pick.match_date}</p>
+                              </td>
+                              <td className="p-4 text-center">
+                                <span className="font-mono text-sm text-zinc-300">
+                                  {pick.projected_home_score} - {pick.projected_away_score}
+                                </span>
+                              </td>
+                              <td className="p-4 text-center">
+                                <OutcomeBadge outcome={pick.predicted_outcome} />
+                              </td>
+                              <td className="p-4 text-center">
+                                <span className="font-mono text-sm text-green-400">
+                                  {pick.market_odds.toFixed(2)}
+                                </span>
+                              </td>
+                              <td className="p-4 text-center">
+                                <span className={`font-mono text-sm ${pick.edge_percentage > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
+                                </span>
+                              </td>
+                              <td className="p-4 text-center">
+                                <ConfidenceBadge score={pick.confidence_score} />
+                              </td>
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-zinc-400 hover:text-green-500 hover:bg-green-500/10"
+                                    onClick={() => setExpandedPick(expandedPick === pick.id ? null : pick.id)}
+                                    data-testid={`expand-reasoning-${pick.id}`}
+                                  >
+                                    {expandedPick === pick.id ? <ChevronDown className="w-4 h-4" /> : <Info className="w-4 h-4" />}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    className="bg-green-600 hover:bg-green-500 text-white text-xs"
+                                    onClick={() => { setSelectedPick(pick); setBetOdds(pick.market_odds.toString()); setShowAddBetDialog(true); }}
+                                    data-testid={`add-bet-${pick.id}`}
+                                  >
+                                    Add to Journal
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                            {expandedPick === pick.id && (
+                              <tr key={`${pick.id}-reasoning`} className="border-b border-zinc-800/50 bg-zinc-900/80">
+                                <td colSpan="7" className="p-6">
+                                  <div className="space-y-6">
+                                    {/* Header */}
+                                    <div className="flex items-center justify-between">
+                                      <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider flex items-center gap-2">
+                                        <Info className="w-4 h-4 text-green-500" />
+                                        Pick Reasoning & Factor Analysis
+                                      </h4>
+                                      <div className="flex items-center gap-4 text-xs">
+                                        <div>
+                                          <span className="text-zinc-500">Model Probability: </span>
+                                          <span className="font-mono font-semibold text-green-400">{pick.model_probability}%</span>
+                                        </div>
+                                        <div>
+                                          <span className="text-zinc-500">Market Probability: </span>
+                                          <span className="font-mono font-semibold text-zinc-400">{pick.market_probability}%</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Confidence Explanation */}
+                                    <div className="bg-zinc-800/50 border border-zinc-700/50 rounded p-4">
+                                      <p className="text-xs text-zinc-400 mb-2">
+                                        <span className="font-semibold text-green-500">Why this pick?</span> Our model gives this outcome a 
+                                        <span className="font-mono font-semibold text-green-400 mx-1">{pick.model_probability}%</span>
+                                        chance of occurring, while the market implies only
+                                        <span className="font-mono font-semibold text-zinc-400 mx-1">{pick.market_probability}%</span>.
+                                        This creates an edge of
+                                        <span className="font-mono font-semibold text-green-500 mx-1">{pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%</span>,
+                                        resulting in a confidence score of
+                                        <span className="font-mono font-semibold text-green-500 mx-1">{pick.confidence_score}/10</span>.
+                                      </p>
+                                    </div>
+                                    
+                                    {/* Factor Breakdowns */}
+                                    <div className="grid md:grid-cols-2 gap-6">
+                                      <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+                                        <FactorBreakdown 
+                                          breakdown={pick.home_breakdown} 
+                                          teamName={`${pick.home_team} (Home)`}
+                                        />
+                                      </div>
+                                      <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+                                        <FactorBreakdown 
+                                          breakdown={pick.away_breakdown} 
+                                          teamName={`${pick.away_team} (Away)`}
+                                        />
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Summary */}
+                                    <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
+                                      💡 Each factor's contribution is calculated by multiplying its weight (set in your model) 
+                                      by the team's rating for that factor. Positive contributions increase the projected score, 
+                                      while negative ones (like injuries or travel distance) decrease it.
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
                         ))}
                       </tbody>
                     </table>

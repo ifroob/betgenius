@@ -38,11 +38,19 @@ class ModelType(str, Enum):
 
 # ============ MODELS ============
 class ModelWeights(BaseModel):
-    team_offense: float = Field(default=20.0, ge=0, le=100)
-    team_defense: float = Field(default=20.0, ge=0, le=100)
-    recent_form: float = Field(default=20.0, ge=0, le=100)
-    injuries: float = Field(default=20.0, ge=0, le=100)
-    home_advantage: float = Field(default=20.0, ge=0, le=100)
+    # Core factors
+    team_offense: float = Field(default=12.0, ge=0, le=100)
+    team_defense: float = Field(default=12.0, ge=0, le=100)
+    recent_form: float = Field(default=12.0, ge=0, le=100)
+    injuries: float = Field(default=10.0, ge=0, le=100)
+    home_advantage: float = Field(default=10.0, ge=0, le=100)
+    # Advanced factors
+    head_to_head: float = Field(default=10.0, ge=0, le=100)
+    rest_days: float = Field(default=8.0, ge=0, le=100)
+    travel_distance: float = Field(default=8.0, ge=0, le=100)
+    referee_influence: float = Field(default=8.0, ge=0, le=100)
+    weather_conditions: float = Field(default=5.0, ge=0, le=100)
+    motivation_level: float = Field(default=5.0, ge=0, le=100)
 
 class BettingModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -153,7 +161,7 @@ EPL_TEAMS_BASE = {
 }
 
 def get_randomized_teams():
-    """Generate team stats with random variations for form and injuries"""
+    """Generate team stats with random variations for all factors"""
     teams = {}
     for name, base in EPL_TEAMS_BASE.items():
         # Randomize form (can swing wildly based on recent results)
@@ -167,12 +175,20 @@ def get_randomized_teams():
         offense = max(50, min(95, base["base_offense"] + random.randint(-5, 5)))
         defense = max(50, min(95, base["base_defense"] + random.randint(-5, 5)))
         
+        # New advanced factors
+        rest_days = random.randint(2, 7)  # Days since last match
+        motivation = random.randint(60, 95)  # Based on league position/form
+        referee_rating = random.randint(65, 85)  # How favorable referee is
+        
         teams[name] = {
             "short": base["short"],
             "offense": offense,
             "defense": defense,
             "form": form,
-            "injury": injury
+            "injury": injury,
+            "rest_days": rest_days,
+            "motivation": motivation,
+            "referee_rating": referee_rating
         }
     return teams
 
@@ -239,6 +255,11 @@ def generate_fixtures():
         kickoff = random.choice(kickoff_times)
         date_str = f"{match_date.strftime('%Y-%m-%d')} {kickoff}"
         
+        # Generate game-specific advanced factors
+        head_to_head_home = random.randint(30, 70)  # Historical home win %
+        weather_rating = random.randint(50, 100)  # 100 = perfect, 50 = poor
+        travel_distance_km = random.randint(50, 400)  # Distance away team travels
+        
         # Generate odds based on team strengths
         home_strength = teams[home_team]["offense"] + teams[home_team]["form"] - teams[home_team]["injury"]
         away_strength = teams[away_team]["offense"] + teams[away_team]["form"] - teams[away_team]["injury"]
@@ -250,7 +271,10 @@ def generate_fixtures():
             "date": date_str,
             "h_odds": h_odds,
             "d_odds": d_odds,
-            "a_odds": a_odds
+            "a_odds": a_odds,
+            "head_to_head_home": head_to_head_home,
+            "weather_rating": weather_rating,
+            "travel_distance": travel_distance_km
         })
     
     return fixtures, teams
@@ -262,48 +286,180 @@ PRESET_MODELS = [
     {
         "id": "preset-balanced",
         "name": "Balanced Pro",
-        "description": "Equal weighting across all factors - great for beginners",
+        "description": "Equal weighting across all 11 factors - great for beginners",
         "model_type": "preset",
-        "weights": {"team_offense": 20, "team_defense": 20, "recent_form": 20, "injuries": 20, "home_advantage": 20},
+        "weights": {
+            "team_offense": 10, "team_defense": 10, "recent_form": 10, "injuries": 10, "home_advantage": 10,
+            "head_to_head": 10, "rest_days": 10, "travel_distance": 10, "referee_influence": 10, 
+            "weather_conditions": 5, "motivation_level": 5
+        },
     },
     {
         "id": "preset-form-focused",
         "name": "Form Hunter",
-        "description": "Emphasizes recent form and momentum",
+        "description": "Emphasizes recent form, rest, and motivation",
         "model_type": "preset",
-        "weights": {"team_offense": 15, "team_defense": 15, "recent_form": 40, "injuries": 10, "home_advantage": 20},
+        "weights": {
+            "team_offense": 10, "team_defense": 10, "recent_form": 25, "injuries": 8, "home_advantage": 12,
+            "head_to_head": 8, "rest_days": 12, "travel_distance": 5, "referee_influence": 3, 
+            "weather_conditions": 2, "motivation_level": 5
+        },
     },
     {
         "id": "preset-stats-heavy",
         "name": "Stats Machine",
-        "description": "Heavy focus on offensive and defensive metrics",
+        "description": "Heavy focus on offensive, defensive, and historical metrics",
         "model_type": "preset",
-        "weights": {"team_offense": 35, "team_defense": 35, "recent_form": 10, "injuries": 10, "home_advantage": 10},
+        "weights": {
+            "team_offense": 20, "team_defense": 20, "recent_form": 8, "injuries": 12, "home_advantage": 8,
+            "head_to_head": 15, "rest_days": 5, "travel_distance": 5, "referee_influence": 3, 
+            "weather_conditions": 2, "motivation_level": 2
+        },
     },
 ]
 
 # ============ HELPER FUNCTIONS ============
-def calculate_team_score(team_name: str, weights: dict, is_home: bool) -> float:
-    """Calculate projected score for a team based on model weights"""
+def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data: dict = None) -> tuple:
+    """Calculate projected score for a team based on model weights
+    Returns: (score, factor_breakdown)
+    """
     team = EPL_TEAMS.get(team_name, {})
     if not team:
-        return 1.5
+        return 1.5, {}
+    
+    if game_data is None:
+        game_data = {}
     
     # Normalize weights to sum to 100
     total_weight = sum(weights.values())
     if total_weight == 0:
-        return 1.5
+        return 1.5, {}
     
     norm_weights = {k: v / total_weight for k, v in weights.items()}
     
-    # Calculate base score (0-3 goals range)
-    offense_contrib = (team.get("offense", 70) / 100) * norm_weights.get("team_offense", 0.2) * 3
-    form_contrib = (team.get("form", 70) / 100) * norm_weights.get("recent_form", 0.2) * 2
-    injury_penalty = (team.get("injury", 10) / 100) * norm_weights.get("injuries", 0.2)
-    home_bonus = 0.3 * norm_weights.get("home_advantage", 0.2) if is_home else 0
+    # Track each factor's contribution for transparency
+    breakdown = {}
     
-    score = offense_contrib + form_contrib + home_bonus - injury_penalty
-    return round(max(0.5, min(4.0, score)), 2)
+    # Core factors (0-3 goals range)
+    offense_value = team.get("offense", 70) / 100
+    offense_contrib = offense_value * norm_weights.get("team_offense", 0) * 3
+    breakdown["team_offense"] = {
+        "raw_value": team.get("offense", 70),
+        "normalized": offense_value,
+        "weight": norm_weights.get("team_offense", 0) * 100,
+        "contribution": offense_contrib,
+        "description": f"Offensive rating of {team.get('offense', 70)}/100"
+    }
+    
+    defense_value = team.get("defense", 70) / 100
+    defense_contrib = defense_value * norm_weights.get("team_defense", 0) * 0.5  # Defense helps scoring indirectly
+    breakdown["team_defense"] = {
+        "raw_value": team.get("defense", 70),
+        "normalized": defense_value,
+        "weight": norm_weights.get("team_defense", 0) * 100,
+        "contribution": defense_contrib,
+        "description": f"Defensive rating of {team.get('defense', 70)}/100"
+    }
+    
+    form_value = team.get("form", 70) / 100
+    form_contrib = form_value * norm_weights.get("recent_form", 0) * 2
+    breakdown["recent_form"] = {
+        "raw_value": team.get("form", 70),
+        "normalized": form_value,
+        "weight": norm_weights.get("recent_form", 0) * 100,
+        "contribution": form_contrib,
+        "description": f"Recent form rating of {team.get('form', 70)}/100"
+    }
+    
+    injury_value = team.get("injury", 10) / 100
+    injury_penalty = injury_value * norm_weights.get("injuries", 0) * 1.5
+    breakdown["injuries"] = {
+        "raw_value": team.get("injury", 10),
+        "normalized": injury_value,
+        "weight": norm_weights.get("injuries", 0) * 100,
+        "contribution": -injury_penalty,
+        "description": f"{team.get('injury', 10)}% squad affected by injuries"
+    }
+    
+    home_bonus = 0.3 * norm_weights.get("home_advantage", 0) if is_home else -0.1 * norm_weights.get("home_advantage", 0)
+    breakdown["home_advantage"] = {
+        "raw_value": 100 if is_home else 0,
+        "normalized": 1.0 if is_home else 0.0,
+        "weight": norm_weights.get("home_advantage", 0) * 100,
+        "contribution": home_bonus,
+        "description": "Playing at home" if is_home else "Playing away"
+    }
+    
+    # Advanced factors
+    h2h_value = game_data.get("head_to_head_home", 50) / 100 if is_home else (100 - game_data.get("head_to_head_home", 50)) / 100
+    h2h_contrib = h2h_value * norm_weights.get("head_to_head", 0) * 0.5
+    breakdown["head_to_head"] = {
+        "raw_value": game_data.get("head_to_head_home", 50) if is_home else 100 - game_data.get("head_to_head_home", 50),
+        "normalized": h2h_value,
+        "weight": norm_weights.get("head_to_head", 0) * 100,
+        "contribution": h2h_contrib,
+        "description": f"Historical win rate: {int(h2h_value * 100)}%"
+    }
+    
+    rest_value = min(team.get("rest_days", 4) / 7, 1.0)
+    rest_contrib = rest_value * norm_weights.get("rest_days", 0) * 0.4
+    breakdown["rest_days"] = {
+        "raw_value": team.get("rest_days", 4),
+        "normalized": rest_value,
+        "weight": norm_weights.get("rest_days", 0) * 100,
+        "contribution": rest_contrib,
+        "description": f"{team.get('rest_days', 4)} days since last match"
+    }
+    
+    # Travel penalty for away team
+    travel_value = 0 if is_home else min(game_data.get("travel_distance", 150) / 400, 1.0)
+    travel_penalty = travel_value * norm_weights.get("travel_distance", 0) * 0.3
+    breakdown["travel_distance"] = {
+        "raw_value": 0 if is_home else game_data.get("travel_distance", 150),
+        "normalized": travel_value,
+        "weight": norm_weights.get("travel_distance", 0) * 100,
+        "contribution": -travel_penalty,
+        "description": f"No travel" if is_home else f"{game_data.get('travel_distance', 150)}km travel"
+    }
+    
+    referee_value = team.get("referee_rating", 75) / 100
+    referee_contrib = referee_value * norm_weights.get("referee_influence", 0) * 0.2
+    breakdown["referee_influence"] = {
+        "raw_value": team.get("referee_rating", 75),
+        "normalized": referee_value,
+        "weight": norm_weights.get("referee_influence", 0) * 100,
+        "contribution": referee_contrib,
+        "description": f"Referee favorability: {team.get('referee_rating', 75)}/100"
+    }
+    
+    weather_value = game_data.get("weather_rating", 80) / 100
+    weather_contrib = weather_value * norm_weights.get("weather_conditions", 0) * 0.15
+    breakdown["weather_conditions"] = {
+        "raw_value": game_data.get("weather_rating", 80),
+        "normalized": weather_value,
+        "weight": norm_weights.get("weather_conditions", 0) * 100,
+        "contribution": weather_contrib,
+        "description": f"Weather conditions: {game_data.get('weather_rating', 80)}/100"
+    }
+    
+    motivation_value = team.get("motivation", 75) / 100
+    motivation_contrib = motivation_value * norm_weights.get("motivation_level", 0) * 0.3
+    breakdown["motivation_level"] = {
+        "raw_value": team.get("motivation", 75),
+        "normalized": motivation_value,
+        "weight": norm_weights.get("motivation_level", 0) * 100,
+        "contribution": motivation_contrib,
+        "description": f"Team motivation: {team.get('motivation', 75)}/100"
+    }
+    
+    # Calculate final score
+    score = (offense_contrib + defense_contrib + form_contrib + home_bonus + 
+             h2h_contrib + rest_contrib + referee_contrib + weather_contrib + 
+             motivation_contrib - injury_penalty - travel_penalty)
+    
+    score = round(max(0.5, min(4.0, score)), 2)
+    
+    return score, breakdown
 
 def calculate_confidence(model_prob: float, market_prob: float) -> int:
     """Calculate confidence score 1-10 based on edge"""
@@ -476,8 +632,9 @@ async def generate_picks(model_id: str):
     picks = []
     
     for i, g in enumerate(MOCK_GAMES):
-        home_score = calculate_team_score(g["home"], weights, is_home=True)
-        away_score = calculate_team_score(g["away"], weights, is_home=False)
+        # Calculate scores with factor breakdown
+        home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
+        away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
         
         probs = calculate_outcome_probabilities(home_score, away_score)
         
@@ -511,6 +668,8 @@ async def generate_picks(model_id: str):
             "edge_percentage": round(edge, 1),
             "model_probability": round(probs[best_outcome] * 100, 1),
             "market_probability": round(market_probs[best_outcome] * 100, 1),
+            "home_breakdown": home_breakdown,
+            "away_breakdown": away_breakdown,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         picks.append(pick)
