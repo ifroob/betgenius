@@ -1,0 +1,199 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║       🏆 BetGenius - HOW TO RUN THE APPLICATION 🏆              ║
+║                                                                  ║
+║          EPL Betting Analytics MVP - Quick Start                ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────┐
+│  METHOD 1: USING SUPERVISOR (CURRENTLY CONFIGURED)              │
+└─────────────────────────────────────────────────────────────────┘
+
+✓ Services are already configured and running!
+
+1. CHECK STATUS:
+   $ supervisorctl status
+   
+   You should see:
+   - backend    RUNNING
+   - frontend   RUNNING
+   - mongodb    RUNNING
+
+2. RESTART IF NEEDED:
+   $ supervisorctl restart all
+
+3. ACCESS THE APPLICATION:
+   Frontend:  http://localhost:3000
+   Backend:   http://localhost:8001
+   API Docs:  http://localhost:8001/docs
+
+┌─────────────────────────────────────────────────────────────────┐
+│  METHOD 2: MANUAL DEVELOPMENT MODE                              │
+└─────────────────────────────────────────────────────────────────┘
+
+TERMINAL 1 - Start Backend:
+   $ cd /app/betgenius/backend
+   $ source venv/bin/activate  # (create first: python -m venv venv)
+   $ pip install -r requirements.txt
+   $ uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+   ✓ Backend running at http://localhost:8001
+
+TERMINAL 2 - Start Frontend:
+   $ cd /app/betgenius/frontend
+   $ yarn install
+   $ yarn start
+   ✓ Frontend running at http://localhost:3000
+
+TERMINAL 3 - Ensure MongoDB:
+   $ sudo systemctl status mongodb
+   $ sudo systemctl start mongodb  # if not running
+   ✓ MongoDB running at localhost:27017
+
+┌─────────────────────────────────────────────────────────────────┐
+│  QUICK TESTS                                                    │
+└─────────────────────────────────────────────────────────────────┘
+
+Test Backend:
+   $ curl http://localhost:8001/api/models
+   $ curl http://localhost:8001/api/games
+   $ curl http://localhost:8001/api/stats
+
+Test Frontend:
+   Open browser: http://localhost:3000
+   - Should see BetGenius dashboard
+   - Try the Models, Value Finder, and Journal tabs
+
+Test MongoDB:
+   $ mongosh
+   > use test_database
+   > db.models.find()
+   > exit
+
+┌─────────────────────────────────────────────────────────────────┐
+│  TROUBLESHOOTING                                                │
+└─────────────────────────────────────────────────────────────────┘
+
+Backend Issues:
+   Check logs: $ tail -f /var/log/supervisor/backend.err.log
+   Or if manual: Check terminal output
+
+Frontend Issues:
+   Check logs: $ tail -f /var/log/supervisor/frontend.err.log
+   Clear cache: $ cd frontend && rm -rf node_modules && yarn install
+
+MongoDB Issues:
+   Restart: $ sudo systemctl restart mongodb
+   Check: $ mongosh --eval "db.version()"
+
+Port Already in Use:
+   $ lsof -i :8001  # Backend port
+   $ lsof -i :3000  # Frontend port
+   $ kill -9 <PID>
+
+┌─────────────────────────────────────────────────────────────────┐
+│  ENVIRONMENT CONFIGURATION                                      │
+└─────────────────────────────────────────────────────────────────┘
+
+Backend (.env location: /app/betgenius/backend/.env):
+   MONGO_URL="mongodb://localhost:27017"
+   DB_NAME="test_database"
+   CORS_ORIGINS="*"
+
+Frontend (.env location: /app/betgenius/frontend/.env):
+   REACT_APP_BACKEND_URL=https://bet-genius-31.preview.emergentagent.com
+   WDS_SOCKET_PORT=443
+   ENABLE_HEALTH_CHECK=false
+
+┌─────────────────────────────────────────────────────────────────┐
+│  DOCUMENTATION GUIDE                                            │
+└─────────────────────────────────────────────────────────────────┘
+
+📖 Start Here:
+   1. README.md          - Overview & quick start
+   2. QUICKSTART.md      - 5-minute setup guide
+   
+📚 For Developers:
+   3. SETUP.md           - Detailed development setup
+   4. PROJECT_STRUCTURE.md - Complete code organization
+   5. API.md             - REST API documentation
+   
+🚀 For Deployment:
+   6. DEPLOYMENT.md      - Production deployment guide
+   
+🎓 For Understanding:
+   7. DOCUMENTATION.md   - Technical specifications
+   8. INDEX.md           - Documentation index & guide
+
+┌─────────────────────────────────────────────────────────────────┐
+│  QUICK COMMANDS CHEAT SHEET                                     │
+└─────────────────────────────────────────────────────────────────┘
+
+# Check all services
+$ supervisorctl status
+
+# Restart services
+$ supervisorctl restart backend
+$ supervisorctl restart frontend
+$ supervisorctl restart all
+
+# View logs
+$ tail -f /var/log/supervisor/backend.err.log
+$ tail -f /var/log/supervisor/frontend.err.log
+
+# MongoDB operations
+$ mongosh
+> show dbs
+> use test_database
+> db.models.find()
+
+# Test API
+$ curl http://localhost:8001/api/models
+$ curl http://localhost:8001/docs  # Interactive API docs
+
+┌─────────────────────────────────────────────────────────────────┐
+│  CURRENT STATUS                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+✓ Backend:  CONFIGURED & RUNNING
+✓ Frontend: CONFIGURED & RUNNING
+✓ MongoDB:  CONFIGURED & RUNNING
+✓ Dependencies: INSTALLED
+✓ Documentation: COMPLETE
+
+APPLICATION IS READY TO USE! 🎉
+
+Access: http://localhost:3000
+
+┌─────────────────────────────────────────────────────────────────┐
+│  FEATURES AVAILABLE                                             │
+└─────────────────────────────────────────────────────────────────┘
+
+🎯 Create Custom Betting Models
+   - Adjust 5 weighted factors
+   - Use preset models
+   - Save and manage models
+
+📊 Find Value Bets
+   - Generate picks using models
+   - See confidence scores (1-10)
+   - View edge percentages
+
+📈 Track Your Bets
+   - Add picks to journal
+   - Settle bets with results
+   - View win rate, ROI, P&L
+
+┌─────────────────────────────────────────────────────────────────┐
+│  NEED HELP?                                                     │
+└─────────────────────────────────────────────────────────────────┘
+
+1. Read the documentation (start with README.md)
+2. Check troubleshooting sections in docs
+3. View logs for error messages
+4. Test each component separately
+5. Verify environment variables
+
+═══════════════════════════════════════════════════════════════════
+                    🏆 BetGenius Team 🏆
+═══════════════════════════════════════════════════════════════════
