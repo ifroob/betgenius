@@ -1,0 +1,96 @@
+{
+  "identity": {
+    "name": "E1 - The Anti-AI Designer",
+    "mission": "Create a top 1% Sports Betting Analytics MVP that feels like a professional trading terminal for football.",
+    "tone": "High-stakes, Analytical, 'Moneyball', Sleek, Dark Mode."
+  },
+  "typography": {
+    "primary_font": "Chivo",
+    "secondary_font": "JetBrains Mono",
+    "import_instruction": "Add this to index.html or import in CSS: @import url('https://fonts.googleapis.com/css2?family=Chivo:wght@300;400;700;900&family=JetBrains+Mono:wght@400;700&display=swap');",
+    "usage": {
+      "headings": "font-family: 'Chivo', sans-serif; font-weight: 900; tracking-tight; uppercase;",
+      "body": "font-family: 'JetBrains Mono', monospace; font-size: 14px;",
+      "numbers": "font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;"
+    }
+  },
+  "colors": {
+    "palette_name": "Neon Quant",
+    "background": {
+      "default": "#09090b",
+      "card": "#121214",
+      "subtle": "#18181b"
+    },
+    "primary": {
+      "main": "#22c55e",
+      "glow": "0 0 20px rgba(34, 197, 94, 0.5)"
+    },
+    "accents": {
+      "win": "#22c55e",
+      "loss": "#ef4444",
+      "pending": "#eab308",
+      "neutral": "#71717a"
+    },
+    "text": {
+      "primary": "#fafafa",
+      "secondary": "#a1a1aa",
+      "muted": "#52525b"
+    }
+  },
+  "visual_enhancers": {
+    "surface_style": "Grid Borders",
+    "surface_css": "border border-white/5 bg-black/40 backdrop-blur-md",
+    "borders": "1px solid rgba(255,255,255,0.08)",
+    "shadows": "0 4px 24px -2px rgba(0, 0, 0, 0.5)",
+    "gradients": "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%)"
+  },
+  "layout": {
+    "dashboard_grid": "grid grid-cols-1 md:grid-cols-4 gap-4 p-4 md:p-6",
+    "bento_cells": {
+      "hero": "col-span-1 md:col-span-2 row-span-2",
+      "tall": "col-span-1 row-span-2",
+      "standard": "col-span-1 row-span-1"
+    },
+    "spacing": "Compact but breathable. Use p-6 for cards, gap-4 for grids."
+  },
+  "components": {
+    "buttons": {
+      "style": "Sharp edges or minimal radius (rounded-sm).",
+      "primary": "bg-green-600 hover:bg-green-500 text-white font-bold uppercase tracking-wider",
+      "secondary": "border border-white/20 hover:bg-white/5 text-white"
+    },
+    "cards": {
+      "style": "No default shadow. 1px border (white/10). Darker background than body.",
+      "hover": "hover:border-green-500/50 transition-colors duration-300"
+    },
+    "inputs": {
+      "style": "bg-black/50 border-white/10 focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+    },
+    "sliders": {
+      "instruction": "Custom Shadcn slider. Track: zinc-800. Range: green-500. Thumb: green-400 with glow."
+    }
+  },
+  "image_urls": {
+    "hero_bg": "https://images.unsplash.com/photo-1706675780107-7c43cc487928?q=85&w=1920&auto=format&fit=crop",
+    "login_bg": "https://images.pexels.com/photos/918798/pexels-photo-918798.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "placeholder_team": "https://images.unsplash.com/photo-1706675780103-3ca1f89143a0?q=85&w=600&auto=format&fit=crop"
+  },
+  "instructions_to_main_agent": [
+    "1. SETUP: Install 'lucide-react' and 'recharts' if not present.",
+    "2. THEME: Force dark mode in Tailwind config. Set background to #09090b.",
+    "3. FONTS: Import Chivo and JetBrains Mono. Apply Chivo to all headings (h1-h6) and JetBrains Mono to all data/numbers.",
+    "4. LAYOUT: Build the Dashboard using the 'Control Room' grid strategy (dense, data-heavy).",
+    "5. COMPONENTS: Customize Shadcn components to remove rounded-xl (use rounded-sm or rounded-md). Remove white backgrounds, use zinc-950 or black.",
+    "6. MODEL ENGINE: Create a specialized 'SliderGroup' component for the 5 inputs. Visual feedback is key.",
+    "7. VALUE FINDER: Use a table layout with 'Confidence Score' as a colored badge (Green=High, Red=Low).",
+    "8. JOURNAL: Simple list view with status indicators.",
+    "9. MOCK DATA: Generate realistic-looking EPL data (Arsenal vs Man City, etc.) with odds like 2.10, 1.85."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not use gradients for main backgrounds, only for subtle highlights.",
+    "Use 'sonner' for notifications.",
+    "Ensure all interactive elements have hover states (text color change or border glow).",
+    "Use data-testid for all key interactions.",
+    "Keep the UI 'flat' but use borders for hierarchy."
+  ]
+}
