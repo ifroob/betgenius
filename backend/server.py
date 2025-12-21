@@ -298,7 +298,6 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool) -> float:
     
     # Calculate base score (0-3 goals range)
     offense_contrib = (team.get("offense", 70) / 100) * norm_weights.get("team_offense", 0.2) * 3
-    defense_opp_weakness = 1 - (team.get("defense", 70) / 100)  # opponent's scoring potential
     form_contrib = (team.get("form", 70) / 100) * norm_weights.get("recent_form", 0.2) * 2
     injury_penalty = (team.get("injury", 10) / 100) * norm_weights.get("injuries", 0.2)
     home_bonus = 0.3 * norm_weights.get("home_advantage", 0.2) if is_home else 0
