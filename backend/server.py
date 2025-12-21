@@ -314,7 +314,8 @@ async def create_model(model_input: BettingModelCreate):
     )
     doc = model.model_dump()
     await db.models.insert_one(doc)
-    return doc
+    # Return the document without MongoDB's _id field
+    return {k: v for k, v in doc.items() if k != '_id'}
 
 @api_router.get("/models/{model_id}")
 async def get_model(model_id: str):
