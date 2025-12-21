@@ -318,6 +318,17 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-4">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-zinc-700 text-zinc-400 hover:text-green-500 hover:border-green-500/50"
+                onClick={refreshFixtures}
+                disabled={loading}
+                data-testid="refresh-fixtures-btn"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                New Fixtures
+              </Button>
               <Badge variant="outline" className="border-green-500/40 text-green-500 font-mono text-xs">
                 {games.length} MATCHES
               </Badge>
