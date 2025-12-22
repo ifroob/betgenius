@@ -67,6 +67,11 @@ brew services start mongodb-community@6.0
 mongosh --eval "db.version()"
 ```
 
+# Podman
+podman run -d -p 27017:27017 --name mongodb mongo:latest
+
+podman exec -it mongodb bash
+
 ### Step 3: Setup Backend
 
 ```bash
@@ -77,8 +82,8 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
+pip3 install --upgrade pip
+pip3 install -r requirements.txt
 
 # Configure environment
 cat > .env << EOF
