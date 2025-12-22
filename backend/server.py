@@ -1107,7 +1107,8 @@ async def generate_picks(model_id: str):
             "away": 1 / g.get("a_odds", 3.0)
         }
         
-        best_outcome = max(probs.keys(), key=lambda k: probs[k] - market_probs[k])
+        # Pick the outcome with highest model probability (aligns with projected scores)
+        best_outcome = max(probs.keys(), key=lambda k: probs[k])
         edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
         
         market_odds = {
@@ -1320,7 +1321,8 @@ async def simulate_model(sim_request: SimulationRequest):
             "away": 1 / g["a_odds"]
         }
         
-        best_outcome = max(probs.keys(), key=lambda k: probs[k] - market_probs[k])
+        # Pick the outcome with highest model probability (aligns with projected scores)
+        best_outcome = max(probs.keys(), key=lambda k: probs[k])
         edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
         
         market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
