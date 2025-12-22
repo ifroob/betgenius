@@ -796,21 +796,36 @@ def calculate_confidence(model_prob: float, market_prob: float, home_score: floa
     return final_confidence, explanation
 
 def calculate_outcome_probabilities(home_score: float, away_score: float) -> dict:
-    """Convert projected scores to outcome probabilities"""
+    """
+    Convert projected scores to outcome probabilities.
+    Dynamic draw probability - increases when teams are more evenly matched.
+    """
     diff = home_score - away_score
     
     if diff > 0.8:
+        # Clear home advantage
         home_prob = 0.55 + min(diff * 0.1, 0.3)
         draw_prob = 0.25 - min(diff * 0.05, 0.15)
         away_prob = 1 - home_prob - draw_prob
     elif diff < -0.8:
+        # Clear away advantage
         away_prob = 0.55 + min(abs(diff) * 0.1, 0.3)
         draw_prob = 0.25 - min(abs(diff) * 0.05, 0.15)
         home_prob = 1 - away_prob - draw_prob
     else:
-        draw_prob = 0.30
-        home_prob = 0.35 + diff * 0.1
-        away_prob = 1 - home_prob - draw_prob
+        # Close match - dynamic draw probability based on how evenly matched
+        # Draw probability: 40% when perfectly even (diff=0), declining to 25% at diff=0.8
+        evenness_factor = 1 - min(abs(diff), 0.8) / 0.8  # 1.0 when diff=0, 0.0 when diff=0.8
+        draw_prob = 0.25 + (0.15 * evenness_factor)
+        
+        # Split remaining probability between home and away based on score difference
+        remaining = 1 - draw_prob
+        if diff >= 0:
+            home_prob = remaining * (0.5 + diff * 0.1)
+            away_prob = remaining - home_prob
+        else:
+            away_prob = remaining * (0.5 + abs(diff) * 0.1)
+            home_prob = remaining - away_prob
     
     return {
         "home": round(max(0.05, min(0.85, home_prob)), 3),
