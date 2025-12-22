@@ -235,6 +235,12 @@ function App() {
   const [simulationLoading, setSimulationLoading] = useState(false);
   const [selectedSimModel, setSelectedSimModel] = useState("");
 
+  // Team details modal states
+  const [showTeamDetailsDialog, setShowTeamDetailsDialog] = useState(false);
+  const [selectedTeamName, setSelectedTeamName] = useState(null);
+  const [teamDetails, setTeamDetails] = useState(null);
+  const [teamDetailsLoading, setTeamDetailsLoading] = useState(false);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
@@ -267,6 +273,27 @@ function App() {
       toast.error("Failed to refresh fixtures");
     }
     setLoading(false);
+  };
+
+  // Fetch team details
+  const fetchTeamDetails = async (teamName) => {
+    setTeamDetailsLoading(true);
+    setShowTeamDetailsDialog(true);
+    setSelectedTeamName(teamName);
+    try {
+      const res = await axios.get(`${API}/teams/${encodeURIComponent(teamName)}`);
+      setTeamDetails(res.data);
+    } catch (err) {
+      console.error("Error fetching team details:", err);
+      toast.error("Failed to load team details");
+      setShowTeamDetailsDialog(false);
+    }
+    setTeamDetailsLoading(false);
+  };
+
+  // Handle team name click
+  const handleTeamClick = (teamName) => {
+    fetchTeamDetails(teamName);
   };
 
   useEffect(() => {
@@ -503,9 +530,23 @@ function App() {
                 <CardContent className="space-y-2">
                   {games.slice(0, 4).map((game) => (
                     <div key={game.id} className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-sm border border-zinc-700/50">
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm font-medium text-zinc-200">
-                          {game.home_team} vs {game.away_team}
+                          <button
+                            onClick={() => handleTeamClick(game.home_team)}
+                            className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                            data-testid={`team-link-${game.home_team.replace(/\s+/g, '-')}`}
+                          >
+                            {game.home_team}
+                          </button>
+                          {' vs '}
+                          <button
+                            onClick={() => handleTeamClick(game.away_team)}
+                            className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                            data-testid={`team-link-${game.away_team.replace(/\s+/g, '-')}`}
+                          >
+                            {game.away_team}
+                          </button>
                         </p>
                         <p className="text-xs text-zinc-500">{game.match_date}</p>
                       </div>
@@ -534,7 +575,19 @@ function App() {
                       <div key={entry.id} className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-sm border border-zinc-700/50">
                         <div>
                           <p className="text-sm font-medium text-zinc-200">
-                            {entry.home_team} vs {entry.away_team}
+                            <button
+                              onClick={() => handleTeamClick(entry.home_team)}
+                              className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                            >
+                              {entry.home_team}
+                            </button>
+                            {' vs '}
+                            <button
+                              onClick={() => handleTeamClick(entry.away_team)}
+                              className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                            >
+                              {entry.away_team}
+                            </button>
                           </p>
                           <p className="text-xs text-zinc-500">{entry.model_name}</p>
                         </div>
@@ -814,7 +867,19 @@ function App() {
                             <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
                               <td className="p-4">
                                 <p className="text-sm font-medium text-zinc-200">
-                                  {pick.home_team} vs {pick.away_team}
+                                  <button
+                                    onClick={() => handleTeamClick(pick.home_team)}
+                                    className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                                  >
+                                    {pick.home_team}
+                                  </button>
+                                  {' vs '}
+                                  <button
+                                    onClick={() => handleTeamClick(pick.away_team)}
+                                    className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                                  >
+                                    {pick.away_team}
+                                  </button>
                                 </p>
                                 <p className="text-xs text-zinc-500">{pick.match_date}</p>
                               </td>
@@ -1339,6 +1404,219 @@ function App() {
               Confirm Result
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Team Details Dialog */}
+      <Dialog open={showTeamDetailsDialog} onOpenChange={setShowTeamDetailsDialog}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-display text-green-500">
+              {selectedTeamName}
+            </DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              Detailed team statistics and recent performance
+            </DialogDescription>
+          </DialogHeader>
+          
+          {teamDetailsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <RefreshCw className="w-8 h-8 text-green-500 animate-spin" />
+            </div>
+          ) : teamDetails ? (
+            <div className="space-y-6">
+              {/* Team Ratings */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-400 uppercase">Offense</span>
+                      <span className="text-2xl font-bold text-green-500">{teamDetails.ratings.offense}</span>
+                    </div>
+                    <div className="mt-2 h-2 bg-zinc-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-green-500" style={{ width: `${teamDetails.ratings.offense}%` }}></div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-400 uppercase">Defense</span>
+                      <span className="text-2xl font-bold text-blue-500">{teamDetails.ratings.defense}</span>
+                    </div>
+                    <div className="mt-2 h-2 bg-zinc-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500" style={{ width: `${teamDetails.ratings.defense}%` }}></div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-400 uppercase">Form</span>
+                      <span className="text-2xl font-bold text-orange-500">{teamDetails.ratings.form}</span>
+                    </div>
+                    <div className="mt-2 h-2 bg-zinc-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-orange-500" style={{ width: `${teamDetails.ratings.form}%` }}></div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardContent className="p-4">
+                    <div className="text-center">
+                      <span className="text-xs text-zinc-400 uppercase block">Motivation</span>
+                      <span className="text-2xl font-bold text-purple-500">{teamDetails.ratings.motivation}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardContent className="p-4">
+                    <div className="text-center">
+                      <span className="text-xs text-zinc-400 uppercase block">Rest Days</span>
+                      <span className="text-2xl font-bold text-cyan-500">{teamDetails.ratings.rest_days}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardContent className="p-4">
+                    <div className="text-center">
+                      <span className="text-xs text-zinc-400 uppercase block">Injury Impact</span>
+                      <span className="text-2xl font-bold text-red-500">{teamDetails.ratings.injury_impact}%</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Season Statistics */}
+              <Card className="bg-zinc-800/50 border-zinc-700">
+                <CardHeader>
+                  <CardTitle className="text-lg text-green-500">Season Statistics</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="text-center p-3 bg-zinc-900/50 rounded">
+                      <p className="text-xs text-zinc-400 uppercase">Matches</p>
+                      <p className="text-2xl font-bold text-zinc-100">{teamDetails.statistics.total_matches}</p>
+                    </div>
+                    <div className="text-center p-3 bg-zinc-900/50 rounded">
+                      <p className="text-xs text-zinc-400 uppercase">Win Rate</p>
+                      <p className="text-2xl font-bold text-green-500">{teamDetails.statistics.win_rate}%</p>
+                    </div>
+                    <div className="text-center p-3 bg-zinc-900/50 rounded">
+                      <p className="text-xs text-zinc-400 uppercase">Avg Goals Scored</p>
+                      <p className="text-2xl font-bold text-blue-500">{teamDetails.statistics.avg_goals_scored}</p>
+                    </div>
+                    <div className="text-center p-3 bg-zinc-900/50 rounded">
+                      <p className="text-xs text-zinc-400 uppercase">Avg Goals Conceded</p>
+                      <p className="text-2xl font-bold text-red-500">{teamDetails.statistics.avg_goals_conceded}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-4 gap-4">
+                    <div className="text-center p-3 bg-green-500/10 rounded border border-green-500/30">
+                      <p className="text-xs text-zinc-400 uppercase">Wins</p>
+                      <p className="text-xl font-bold text-green-500">{teamDetails.statistics.wins}</p>
+                    </div>
+                    <div className="text-center p-3 bg-yellow-500/10 rounded border border-yellow-500/30">
+                      <p className="text-xs text-zinc-400 uppercase">Draws</p>
+                      <p className="text-xl font-bold text-yellow-500">{teamDetails.statistics.draws}</p>
+                    </div>
+                    <div className="text-center p-3 bg-red-500/10 rounded border border-red-500/30">
+                      <p className="text-xs text-zinc-400 uppercase">Losses</p>
+                      <p className="text-xl font-bold text-red-500">{teamDetails.statistics.losses}</p>
+                    </div>
+                    <div className="text-center p-3 bg-blue-500/10 rounded border border-blue-500/30">
+                      <p className="text-xs text-zinc-400 uppercase">Goal Diff</p>
+                      <p className="text-xl font-bold text-blue-500">{teamDetails.statistics.goal_difference > 0 ? '+' : ''}{teamDetails.statistics.goal_difference}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Recent Matches */}
+              {teamDetails.recent_matches && teamDetails.recent_matches.length > 0 && (
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-green-500">Recent Matches</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {teamDetails.recent_matches.map((match, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-700/50">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <Badge className={`text-xs ${
+                                match.result === 'won' ? 'bg-green-500/20 text-green-500 border-green-500/40' :
+                                match.result === 'draw' ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/40' :
+                                'bg-red-500/20 text-red-500 border-red-500/40'
+                              }`}>
+                                {match.result.toUpperCase()}
+                              </Badge>
+                              <span className="text-sm font-medium text-zinc-200">
+                                vs {match.opponent}
+                              </span>
+                              <span className="text-xs text-zinc-500">({match.home_away})</span>
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-1">{match.date}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold font-mono text-zinc-100">{match.score}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Upcoming Fixtures */}
+              {teamDetails.upcoming_fixtures && teamDetails.upcoming_fixtures.length > 0 && (
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-green-500">Upcoming Fixtures</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {teamDetails.upcoming_fixtures.map((fixture, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-700/50">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-zinc-200">
+                                vs {fixture.opponent}
+                              </span>
+                              <span className="text-xs text-zinc-500">({fixture.home_away})</span>
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-1">{fixture.date}</p>
+                          </div>
+                          <div className="flex gap-2 text-xs font-mono">
+                            <span className="text-blue-400">{fixture.home_odds}</span>
+                            <span className="text-zinc-500">{fixture.draw_odds}</span>
+                            <span className="text-orange-400">{fixture.away_odds}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Data Source Badge */}
+              <div className="text-center">
+                <Badge variant="outline" className={`${
+                  teamDetails.data_source === 'api' ? 'border-green-500/40 text-green-500' : 'border-yellow-500/40 text-yellow-500'
+                }`}>
+                  Data Source: {teamDetails.data_source === 'api' ? 'Real API' : 'Mock Data'}
+                </Badge>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-zinc-500">
+              No data available
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

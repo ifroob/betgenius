@@ -281,7 +281,8 @@ def generate_fixtures():
         # Generate match date (spread over next 7 days)
         match_date = base_date + timedelta(days=i // 2, hours=random.randint(0, 8))
         kickoff = random.choice(kickoff_times)
-        date_str = f"{match_date.strftime('%Y-%m-%d')} {kickoff}"
+        # Format: "Sat, Dec 28, 2024 at 3:00 PM"
+        date_str = match_date.strftime('%a, %b %d, %Y') + f" at {kickoff}"
         
         # Generate game-specific advanced factors
         head_to_head_home = random.randint(30, 70)  # Historical home win %
@@ -342,7 +343,7 @@ def generate_historical_games(count=20):
         
         match_date = base_date + timedelta(days=i // 2, hours=random.randint(0, 8))
         kickoff = random.choice(kickoff_times)
-        date_str = f"{match_date.strftime('%Y-%m-%d')} {kickoff}"
+        date_str = match_date.strftime('%a, %b %d, %Y') + f" at {kickoff}"
         
         home_strength = teams[home_team]["offense"] + teams[home_team]["form"] - teams[home_team]["injury"]
         away_strength = teams[away_team]["offense"] + teams[away_team]["form"] - teams[away_team]["injury"]
@@ -559,8 +560,16 @@ async def fetch_epl_fixtures_from_api():
             for match in matches:
                 home_team = match["homeTeam"]["name"]
                 away_team = match["awayTeam"]["name"]
-                match_date = match["utcDate"]
+                match_date_raw = match["utcDate"]
                 status = match["status"]
+                
+                # Format datetime to be more readable
+                from datetime import datetime as dt
+                try:
+                    match_dt = dt.fromisoformat(match_date_raw.replace('Z', '+00:00'))
+                    match_date = match_dt.strftime('%a, %b %d, %Y at %I:%M %p')
+                except:
+                    match_date = match_date_raw
                 
                 game = {
                     "id": f"api-{match['id']}",
@@ -900,6 +909,117 @@ async def get_teams():
             "injury_impact": data.get("injury", 10)
         })
     return teams
+
+@api_router.get("/teams/{team_name}")
+async def get_team_details(team_name: str):
+    """Get detailed information about a specific team"""
+    # Use API teams if available, otherwise use mock teams
+    source_teams = API_TEAMS if API_TEAMS else EPL_TEAMS
+    source_games = API_GAMES if API_GAMES else MOCK_GAMES
+    
+    # Find team data
+    team_data = source_teams.get(team_name)
+    if not team_data:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get recent matches for this team (from historical data)
+    recent_matches = []
+    for game in HISTORICAL_GAMES[-10:]:  # Last 10 completed matches
+        if game.get("home") == team_name or game.get("away") == team_name:
+            is_home = game.get("home") == team_name
+            opponent = game.get("away") if is_home else game.get("home")
+            result = game.get("result")
+            
+            # Determine match result from team's perspective
+            if result:
+                if (result == "home" and is_home) or (result == "away" and not is_home):
+                    match_result = "won"
+                elif result == "draw":
+                    match_result = "draw"
+                else:
+                    match_result = "lost"
+            else:
+                match_result = "unknown"
+            
+            recent_matches.append({
+                "date": game.get("date"),
+                "opponent": opponent,
+                "home_away": "Home" if is_home else "Away",
+                "score": f"{game.get('home_score', 0)}-{game.get('away_score', 0)}",
+                "result": match_result,
+                "home_team": game.get("home"),
+                "away_team": game.get("away"),
+                "home_score": game.get("home_score"),
+                "away_score": game.get("away_score")
+            })
+    
+    # Get upcoming fixtures for this team
+    upcoming_fixtures = []
+    for game in source_games[:10]:  # Next 10 games
+        if game.get("home") == team_name or game.get("away") == team_name:
+            is_home = game.get("home") == team_name
+            opponent = game.get("away") if is_home else game.get("home")
+            
+            upcoming_fixtures.append({
+                "date": game.get("date"),
+                "opponent": opponent,
+                "home_away": "Home" if is_home else "Away",
+                "home_odds": game.get("h_odds"),
+                "draw_odds": game.get("d_odds"),
+                "away_odds": game.get("a_odds"),
+                "home_team": game.get("home"),
+                "away_team": game.get("away")
+            })
+    
+    # Calculate team statistics from recent matches
+    total_matches = len([m for m in recent_matches if m["result"] != "unknown"])
+    wins = len([m for m in recent_matches if m["result"] == "won"])
+    draws = len([m for m in recent_matches if m["result"] == "draw"])
+    losses = len([m for m in recent_matches if m["result"] == "lost"])
+    
+    # Calculate goals
+    goals_scored = 0
+    goals_conceded = 0
+    for match in recent_matches:
+        if match.get("home_score") is not None and match.get("away_score") is not None:
+            if match["home_team"] == team_name:
+                goals_scored += match["home_score"]
+                goals_conceded += match["away_score"]
+            else:
+                goals_scored += match["away_score"]
+                goals_conceded += match["home_score"]
+    
+    win_rate = (wins / total_matches * 100) if total_matches > 0 else 0
+    avg_goals_scored = goals_scored / total_matches if total_matches > 0 else 0
+    avg_goals_conceded = goals_conceded / total_matches if total_matches > 0 else 0
+    
+    return {
+        "name": team_name,
+        "short_name": team_data.get("short", team_name[:3].upper()),
+        "ratings": {
+            "offense": team_data.get("offense", 70),
+            "defense": team_data.get("defense", 70),
+            "form": team_data.get("form", 70),
+            "injury_impact": team_data.get("injury", 10),
+            "motivation": team_data.get("motivation", 75),
+            "rest_days": team_data.get("rest_days", 4)
+        },
+        "statistics": {
+            "total_matches": total_matches,
+            "wins": wins,
+            "draws": draws,
+            "losses": losses,
+            "win_rate": round(win_rate, 1),
+            "goals_scored": goals_scored,
+            "goals_conceded": goals_conceded,
+            "avg_goals_scored": round(avg_goals_scored, 2),
+            "avg_goals_conceded": round(avg_goals_conceded, 2),
+            "goal_difference": goals_scored - goals_conceded
+        },
+        "recent_matches": recent_matches[:5],  # Last 5 matches
+        "upcoming_fixtures": upcoming_fixtures[:3],  # Next 3 fixtures
+        "data_source": "api" if API_TEAMS else "mock"
+    }
 
 @api_router.post("/refresh-data")
 async def refresh_data():
