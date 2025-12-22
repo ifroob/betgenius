@@ -37,20 +37,27 @@ class ModelType(str, Enum):
     CUSTOM = "custom"
 
 # ============ MODELS ============
+# Flexible weights model - accepts any factors as key-value pairs
 class ModelWeights(BaseModel):
-    # Core factors
-    team_offense: float = Field(default=12.0, ge=0, le=100)
-    team_defense: float = Field(default=12.0, ge=0, le=100)
-    recent_form: float = Field(default=12.0, ge=0, le=100)
-    injuries: float = Field(default=10.0, ge=0, le=100)
-    home_advantage: float = Field(default=10.0, ge=0, le=100)
-    # Advanced factors
-    head_to_head: float = Field(default=10.0, ge=0, le=100)
-    rest_days: float = Field(default=8.0, ge=0, le=100)
-    travel_distance: float = Field(default=8.0, ge=0, le=100)
-    referee_influence: float = Field(default=8.0, ge=0, le=100)
-    weather_conditions: float = Field(default=5.0, ge=0, le=100)
-    motivation_level: float = Field(default=5.0, ge=0, le=100)
+    model_config = ConfigDict(extra="allow")  # Allow any additional fields
+    
+    def __init__(self, **data):
+        # Ensure all values are floats between 0-100
+        validated_data = {}
+        for key, value in data.items():
+            if isinstance(value, (int, float)):
+                validated_data[key] = max(0.0, min(100.0, float(value)))
+            else:
+                validated_data[key] = 0.0
+        super().__init__(**validated_data)
+    
+    def dict(self, **kwargs):
+        # Return all dynamic fields
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+    
+    def model_dump(self, **kwargs):
+        # Return all dynamic fields
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
 class BettingModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -89,6 +96,9 @@ class Game(BaseModel):
     result: Optional[str] = None  # "home", "draw", "away", None
     home_score: Optional[int] = None
     away_score: Optional[int] = None
+    is_completed: bool = False
+    data_source: str = "mock"  # "mock" or "api"
+    api_id: Optional[int] = None  # ID from external API
 
 class Pick(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -132,6 +142,24 @@ class JournalEntryCreate(BaseModel):
 
 class SettleBetRequest(BaseModel):
     result: str  # "home", "draw", "away"
+
+class SimulationRequest(BaseModel):
+    model_id: str
+    game_ids: Optional[List[str]] = None  # If None, use all completed games
+    min_confidence: Optional[int] = None  # Filter picks by confidence
+
+class SimulationResult(BaseModel):
+    model_id: str
+    model_name: str
+    total_games: int
+    correct_predictions: int
+    accuracy_percentage: float
+    confidence_breakdown: dict  # Accuracy by confidence level
+    outcome_breakdown: dict  # Accuracy by outcome type (home/draw/away)
+    simulated_roi: float
+    average_odds: float
+    total_stake: float
+    total_return: float
 
 # ============ DYNAMIC DATA GENERATOR ============
 import random
@@ -281,6 +309,178 @@ def generate_fixtures():
 
 # Generate fresh data on each server restart
 MOCK_GAMES, EPL_TEAMS = generate_fixtures()
+
+# Generate historical games with completed results for simulation
+HISTORICAL_GAMES = []
+
+def generate_historical_games(count=20):
+    """Generate historical games with completed results for backtesting"""
+    global HISTORICAL_GAMES
+    team_names = list(EPL_TEAMS_BASE.keys())
+    historical = []
+    teams = get_randomized_teams()
+    
+    base_date = datetime.now(timezone.utc) - timedelta(days=30)  # Games from last 30 days
+    used_teams = set()
+    kickoff_times = ["12:30", "15:00", "17:30", "20:00"]
+    
+    for i in range(count):
+        available = [t for t in team_names if t not in used_teams]
+        if len(available) < 2:
+            used_teams.clear()
+            available = team_names.copy()
+        
+        random.shuffle(available)
+        home_team = available[0]
+        away_team = available[1]
+        used_teams.add(home_team)
+        used_teams.add(away_team)
+        
+        match_date = base_date + timedelta(days=i // 2, hours=random.randint(0, 8))
+        kickoff = random.choice(kickoff_times)
+        date_str = f"{match_date.strftime('%Y-%m-%d')} {kickoff}"
+        
+        home_strength = teams[home_team]["offense"] + teams[home_team]["form"] - teams[home_team]["injury"]
+        away_strength = teams[away_team]["offense"] + teams[away_team]["form"] - teams[away_team]["injury"]
+        h_odds, d_odds, a_odds = generate_odds(home_strength, away_strength)
+        
+        # Simulate actual result based on team strengths
+        diff = home_strength - away_strength
+        rand = random.random()
+        if diff > 15 and rand < 0.6:
+            result = "home"
+            home_score = random.randint(2, 4)
+            away_score = random.randint(0, 1)
+        elif diff < -15 and rand < 0.6:
+            result = "away"
+            home_score = random.randint(0, 1)
+            away_score = random.randint(2, 4)
+        elif abs(diff) < 10 and rand < 0.3:
+            result = "draw"
+            home_score = random.randint(1, 2)
+            away_score = home_score
+        else:
+            # More realistic distribution
+            outcomes = ["home", "draw", "away"]
+            weights = [0.45, 0.27, 0.28]
+            result = random.choices(outcomes, weights=weights)[0]
+            if result == "home":
+                home_score = random.randint(1, 3)
+                away_score = random.randint(0, home_score - 1) if home_score > 1 else 0
+            elif result == "away":
+                away_score = random.randint(1, 3)
+                home_score = random.randint(0, away_score - 1) if away_score > 1 else 0
+            else:
+                home_score = random.randint(0, 2)
+                away_score = home_score
+        
+        head_to_head_home = random.randint(30, 70)
+        weather_rating = random.randint(50, 100)
+        travel_distance_km = random.randint(50, 400)
+        
+        historical.append({
+            "id": f"hist-{i+1}",
+            "home": home_team,
+            "away": away_team,
+            "date": date_str,
+            "h_odds": h_odds,
+            "d_odds": d_odds,
+            "a_odds": a_odds,
+            "head_to_head_home": head_to_head_home,
+            "weather_rating": weather_rating,
+            "travel_distance": travel_distance_km,
+            "result": result,
+            "home_score": home_score,
+            "away_score": away_score,
+            "is_completed": True,
+            "data_source": "mock"
+        })
+    
+    HISTORICAL_GAMES = historical
+    return historical
+
+generate_historical_games()
+
+# ============ FOOTBALL-DATA.ORG API INTEGRATION ============
+FOOTBALL_API_KEY = os.environ.get('FOOTBALL_API_KEY', '')  # Get from env or leave empty
+FOOTBALL_API_URL = "https://api.football-data.org/v4"
+
+async def fetch_epl_fixtures_from_api():
+    """Fetch real EPL fixtures from football-data.org API"""
+    if not FOOTBALL_API_KEY:
+        return []
+    
+    try:
+        import httpx
+        headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+        
+        async with httpx.AsyncClient() as client:
+            # EPL competition code is 'PL' (Premier League)
+            response = await client.get(
+                f"{FOOTBALL_API_URL}/competitions/PL/matches",
+                headers=headers,
+                params={"status": "SCHEDULED,FINISHED"},
+                timeout=10.0
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Football API error: {response.status_code}")
+                return []
+            
+            data = response.json()
+            matches = data.get("matches", [])
+            
+            games = []
+            for match in matches[:10]:  # Limit to 10 games
+                home_team = match["homeTeam"]["name"]
+                away_team = match["awayTeam"]["name"]
+                match_date = match["utcDate"]
+                status = match["status"]
+                
+                # Generate or fetch odds (API doesn't provide odds in free tier)
+                home_strength = random.randint(70, 90)
+                away_strength = random.randint(70, 90)
+                h_odds, d_odds, a_odds = generate_odds(home_strength, away_strength)
+                
+                game = {
+                    "id": f"api-{match['id']}",
+                    "home": home_team,
+                    "away": away_team,
+                    "date": match_date,
+                    "h_odds": h_odds,
+                    "d_odds": d_odds,
+                    "a_odds": a_odds,
+                    "head_to_head_home": 50,
+                    "weather_rating": 80,
+                    "travel_distance": random.randint(50, 400),
+                    "data_source": "api",
+                    "api_id": match["id"],
+                    "is_completed": status == "FINISHED"
+                }
+                
+                # Add result if finished
+                if status == "FINISHED":
+                    score = match.get("score", {}).get("fullTime", {})
+                    home_score = score.get("home")
+                    away_score = score.get("away")
+                    
+                    if home_score is not None and away_score is not None:
+                        game["home_score"] = home_score
+                        game["away_score"] = away_score
+                        
+                        if home_score > away_score:
+                            game["result"] = "home"
+                        elif away_score > home_score:
+                            game["result"] = "away"
+                        else:
+                            game["result"] = "draw"
+                
+                games.append(game)
+            
+            return games
+    except Exception as e:
+        logger.error(f"Error fetching from Football API: {e}")
+        return []
 
 PRESET_MODELS = [
     {
@@ -531,25 +731,76 @@ async def refresh_data():
 
 # ---- Games ----
 @api_router.get("/games")
-async def get_games():
+async def get_games(include_historical: bool = False, source: str = "all"):
+    """Get games - upcoming by default, can include historical and filter by source"""
     games = []
-    for i, g in enumerate(MOCK_GAMES):
-        home_data = EPL_TEAMS.get(g["home"], {})
-        away_data = EPL_TEAMS.get(g["away"], {})
-        games.append({
-            "id": f"game-{i+1}",
-            "home_team": g["home"],
-            "away_team": g["away"],
-            "match_date": g["date"],
-            "home_odds": g["h_odds"],
-            "draw_odds": g["d_odds"],
-            "away_odds": g["a_odds"],
-            "home_team_data": home_data,
-            "away_team_data": away_data,
-            "result": None,
-            "home_score": None,
-            "away_score": None
-        })
+    
+    # Add upcoming games
+    if source in ["all", "mock"]:
+        for i, g in enumerate(MOCK_GAMES):
+            home_data = EPL_TEAMS.get(g["home"], {})
+            away_data = EPL_TEAMS.get(g["away"], {})
+            games.append({
+                "id": f"game-{i+1}",
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "home_odds": g["h_odds"],
+                "draw_odds": g["d_odds"],
+                "away_odds": g["a_odds"],
+                "home_team_data": home_data,
+                "away_team_data": away_data,
+                "result": None,
+                "home_score": None,
+                "away_score": None,
+                "is_completed": False,
+                "data_source": "mock"
+            })
+    
+    # Add historical games if requested
+    if include_historical and source in ["all", "mock"]:
+        for g in HISTORICAL_GAMES:
+            home_data = EPL_TEAMS.get(g["home"], {})
+            away_data = EPL_TEAMS.get(g["away"], {})
+            games.append({
+                "id": g["id"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "home_odds": g["h_odds"],
+                "draw_odds": g["d_odds"],
+                "away_odds": g["a_odds"],
+                "home_team_data": home_data,
+                "away_team_data": away_data,
+                "result": g.get("result"),
+                "home_score": g.get("home_score"),
+                "away_score": g.get("away_score"),
+                "is_completed": g.get("is_completed", False),
+                "data_source": "mock"
+            })
+    
+    # Fetch from API if requested
+    if source in ["all", "api"]:
+        api_games = await fetch_epl_fixtures_from_api()
+        for g in api_games:
+            games.append({
+                "id": g["id"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "home_odds": g["h_odds"],
+                "draw_odds": g["d_odds"],
+                "away_odds": g["a_odds"],
+                "home_team_data": {},
+                "away_team_data": {},
+                "result": g.get("result"),
+                "home_score": g.get("home_score"),
+                "away_score": g.get("away_score"),
+                "is_completed": g.get("is_completed", False),
+                "data_source": "api",
+                "api_id": g.get("api_id")
+            })
+    
     return games
 
 # ---- Models ----
@@ -762,6 +1013,155 @@ async def delete_journal_entry(entry_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Journal entry not found")
     return {"message": "Entry deleted"}
+
+# ---- Simulation ----
+@api_router.post("/simulate")
+async def simulate_model(sim_request: SimulationRequest):
+    """Run backtesting simulation on a model against completed games"""
+    # Get model
+    model = None
+    for p in PRESET_MODELS:
+        if p["id"] == sim_request.model_id:
+            model = p
+            break
+    
+    if not model:
+        model = await db.models.find_one({"id": sim_request.model_id}, {"_id": 0})
+    
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    # Get completed games to simulate
+    games_to_simulate = []
+    if sim_request.game_ids:
+        # Use specified games
+        for game_id in sim_request.game_ids:
+            for g in HISTORICAL_GAMES:
+                if g["id"] == game_id and g.get("is_completed"):
+                    games_to_simulate.append(g)
+    else:
+        # Use all completed historical games
+        games_to_simulate = [g for g in HISTORICAL_GAMES if g.get("is_completed")]
+    
+    if not games_to_simulate:
+        raise HTTPException(status_code=400, detail="No completed games available for simulation")
+    
+    weights = model["weights"]
+    predictions = []
+    correct = 0
+    confidence_stats = {}  # Track accuracy by confidence level
+    outcome_stats = {"home": {"total": 0, "correct": 0}, "draw": {"total": 0, "correct": 0}, "away": {"total": 0, "correct": 0}}
+    total_stake = 0
+    total_return = 0
+    stake_per_bet = 10  # $10 per bet
+    
+    for g in games_to_simulate:
+        # Calculate scores
+        home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
+        away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
+        
+        probs = calculate_outcome_probabilities(home_score, away_score)
+        
+        # Market probabilities
+        market_probs = {
+            "home": 1 / g["h_odds"],
+            "draw": 1 / g["d_odds"],
+            "away": 1 / g["a_odds"]
+        }
+        
+        # Find best value bet
+        best_outcome = max(probs.keys(), key=lambda k: probs[k] - market_probs[k])
+        edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+        
+        market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
+        confidence = calculate_confidence(probs[best_outcome], market_probs[best_outcome])
+        
+        # Apply confidence filter if specified
+        if sim_request.min_confidence and confidence < sim_request.min_confidence:
+            continue
+        
+        # Check if prediction was correct
+        actual_result = g.get("result")
+        is_correct = (best_outcome == actual_result)
+        
+        if is_correct:
+            correct += 1
+        
+        # Update confidence stats
+        if confidence not in confidence_stats:
+            confidence_stats[confidence] = {"total": 0, "correct": 0}
+        confidence_stats[confidence]["total"] += 1
+        if is_correct:
+            confidence_stats[confidence]["correct"] += 1
+        
+        # Update outcome stats
+        outcome_stats[best_outcome]["total"] += 1
+        if is_correct:
+            outcome_stats[best_outcome]["correct"] += 1
+        
+        # Calculate ROI
+        total_stake += stake_per_bet
+        if is_correct:
+            total_return += stake_per_bet * market_odds
+        
+        predictions.append({
+            "game_id": g["id"],
+            "home_team": g["home"],
+            "away_team": g["away"],
+            "match_date": g["date"],
+            "predicted_outcome": best_outcome,
+            "actual_result": actual_result,
+            "correct": is_correct,
+            "confidence": confidence,
+            "odds": market_odds,
+            "home_score_actual": g.get("home_score"),
+            "away_score_actual": g.get("away_score")
+        })
+    
+    total_predictions = len(predictions)
+    if total_predictions == 0:
+        raise HTTPException(status_code=400, detail="No predictions generated (possibly due to confidence filter)")
+    
+    accuracy = (correct / total_predictions) * 100
+    net_profit = total_return - total_stake
+    roi = (net_profit / total_stake) * 100 if total_stake > 0 else 0
+    avg_odds = total_return / correct if correct > 0 else 0
+    
+    # Format confidence breakdown
+    confidence_breakdown = {}
+    for conf_level, stats in confidence_stats.items():
+        acc = (stats["correct"] / stats["total"]) * 100 if stats["total"] > 0 else 0
+        confidence_breakdown[str(conf_level)] = {
+            "total": stats["total"],
+            "correct": stats["correct"],
+            "accuracy": round(acc, 1)
+        }
+    
+    # Format outcome breakdown
+    outcome_breakdown = {}
+    for outcome, stats in outcome_stats.items():
+        acc = (stats["correct"] / stats["total"]) * 100 if stats["total"] > 0 else 0
+        outcome_breakdown[outcome] = {
+            "total": stats["total"],
+            "correct": stats["correct"],
+            "accuracy": round(acc, 1)
+        }
+    
+    return {
+        "model_id": sim_request.model_id,
+        "model_name": model["name"],
+        "total_games": total_predictions,
+        "correct_predictions": correct,
+        "accuracy_percentage": round(accuracy, 2),
+        "confidence_breakdown": confidence_breakdown,
+        "outcome_breakdown": outcome_breakdown,
+        "simulated_roi": round(roi, 2),
+        "average_odds": round(avg_odds, 2),
+        "total_stake": total_stake,
+        "total_return": round(total_return, 2),
+        "net_profit": round(net_profit, 2),
+        "predictions": predictions
+    }
 
 # ---- Stats ----
 @api_router.get("/stats")

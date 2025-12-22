@@ -19,6 +19,10 @@ import {
   Zap,
   RefreshCw,
   Info,
+  Play,
+  CheckCircle,
+  XCircle,
+  BarChart2,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -226,6 +230,11 @@ function App() {
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [settleResult, setSettleResult] = useState("");
 
+  // Simulation states
+  const [simulationResults, setSimulationResults] = useState(null);
+  const [simulationLoading, setSimulationLoading] = useState(false);
+  const [selectedSimModel, setSelectedSimModel] = useState("");
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
@@ -364,6 +373,25 @@ function App() {
     }
   };
 
+  const runSimulation = async (modelId) => {
+    if (!modelId) {
+      toast.error("Please select a model");
+      return;
+    }
+
+    setSimulationLoading(true);
+    try {
+      const response = await axios.post(`${API}/simulate`, { model_id: modelId });
+      setSimulationResults(response.data);
+      toast.success(`Simulation complete: ${response.data.accuracy_percentage}% accuracy`);
+    } catch (err) {
+      toast.error("Failed to run simulation");
+      console.error(err);
+    } finally {
+      setSimulationLoading(false);
+    }
+  };
+
   const totalWeights = Object.values(weights).reduce((a, b) => a + b, 0);
 
   return (
@@ -418,6 +446,10 @@ function App() {
             <TabsTrigger value="picks" className="data-[state=active]:bg-green-500/20 data-[state=active]:text-green-500" data-testid="tab-picks">
               <TrendingUp className="w-4 h-4 mr-2" />
               Value Finder
+            </TabsTrigger>
+            <TabsTrigger value="simulation" className="data-[state=active]:bg-green-500/20 data-[state=active]:text-green-500" data-testid="tab-simulation">
+              <Play className="w-4 h-4 mr-2" />
+              Simulation
             </TabsTrigger>
             <TabsTrigger value="journal" className="data-[state=active]:bg-green-500/20 data-[state=active]:text-green-500" data-testid="tab-journal">
               <BookOpen className="w-4 h-4 mr-2" />
@@ -906,6 +938,238 @@ function App() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* Simulation Tab */}
+          <TabsContent value="simulation" className="space-y-6" data-testid="simulation-content">
+            <Card className="bg-zinc-900/50 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="text-lg font-display text-zinc-100 flex items-center gap-2">
+                  <Play className="w-5 h-5 text-green-500" />
+                  Model Simulation & Backtesting
+                </CardTitle>
+                <CardDescription className="text-zinc-500">
+                  Test your models against historical games to validate accuracy
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="text-sm text-zinc-400 mb-2 block">Select Model</label>
+                    <Select value={selectedSimModel} onValueChange={setSelectedSimModel}>
+                      <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="sim-model-select">
+                        <SelectValue placeholder="Choose a model to test" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-800 border-zinc-700">
+                        {models.map(m => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name} {m.model_type === 'preset' && '(Preset)'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    className="bg-green-600 hover:bg-green-500 text-white font-bold"
+                    onClick={() => runSimulation(selectedSimModel)}
+                    disabled={!selectedSimModel || simulationLoading}
+                    data-testid="run-simulation-btn"
+                  >
+                    {simulationLoading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Running...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 mr-2" />
+                        Run Simulation
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {simulationResults && (
+                  <div className="space-y-6 mt-6">
+                    {/* Summary Stats */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-green-500 uppercase tracking-wider mb-3">
+                        Simulation Results
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <Card className="bg-zinc-800/50 border-zinc-700">
+                          <CardContent className="p-4">
+                            <p className="text-xs text-zinc-500 uppercase">Accuracy</p>
+                            <p className="text-2xl font-bold font-mono text-green-500">
+                              {simulationResults.accuracy_percentage}%
+                            </p>
+                            <p className="text-xs text-zinc-500 mt-1">
+                              {simulationResults.correct_predictions}/{simulationResults.total_games} correct
+                            </p>
+                          </CardContent>
+                        </Card>
+                        <Card className="bg-zinc-800/50 border-zinc-700">
+                          <CardContent className="p-4">
+                            <p className="text-xs text-zinc-500 uppercase">ROI</p>
+                            <p className={`text-2xl font-bold font-mono ${simulationResults.simulated_roi >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {simulationResults.simulated_roi >= 0 ? '+' : ''}{simulationResults.simulated_roi}%
+                            </p>
+                            <p className="text-xs text-zinc-500 mt-1">Return on investment</p>
+                          </CardContent>
+                        </Card>
+                        <Card className="bg-zinc-800/50 border-zinc-700">
+                          <CardContent className="p-4">
+                            <p className="text-xs text-zinc-500 uppercase">Net Profit</p>
+                            <p className={`text-2xl font-bold font-mono ${simulationResults.net_profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {simulationResults.net_profit >= 0 ? '+' : ''}${simulationResults.net_profit}
+                            </p>
+                            <p className="text-xs text-zinc-500 mt-1">
+                              Stake: ${simulationResults.total_stake}
+                            </p>
+                          </CardContent>
+                        </Card>
+                        <Card className="bg-zinc-800/50 border-zinc-700">
+                          <CardContent className="p-4">
+                            <p className="text-xs text-zinc-500 uppercase">Avg Odds</p>
+                            <p className="text-2xl font-bold font-mono text-zinc-300">
+                              {simulationResults.average_odds}
+                            </p>
+                            <p className="text-xs text-zinc-500 mt-1">On winning bets</p>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    </div>
+
+                    {/* Confidence Breakdown */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-green-500 uppercase tracking-wider mb-3">
+                        Accuracy by Confidence Level
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        {Object.entries(simulationResults.confidence_breakdown)
+                          .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
+                          .map(([level, stats]) => (
+                            <Card key={level} className="bg-zinc-800/50 border-zinc-700">
+                              <CardContent className="p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="text-xs text-zinc-500">Level {level}</p>
+                                  <Badge variant="outline" className="text-xs">
+                                    {stats.total}
+                                  </Badge>
+                                </div>
+                                <p className="text-xl font-bold font-mono text-zinc-200">
+                                  {stats.accuracy}%
+                                </p>
+                                <p className="text-xs text-zinc-500 mt-1">
+                                  {stats.correct}/{stats.total}
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                      </div>
+                    </div>
+
+                    {/* Outcome Breakdown */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-green-500 uppercase tracking-wider mb-3">
+                        Accuracy by Outcome Type
+                      </h3>
+                      <div className="grid grid-cols-3 gap-4">
+                        {Object.entries(simulationResults.outcome_breakdown).map(([outcome, stats]) => (
+                          <Card key={outcome} className="bg-zinc-800/50 border-zinc-700">
+                            <CardContent className="p-4">
+                              <p className="text-xs text-zinc-500 uppercase mb-2">{outcome} Predictions</p>
+                              <p className="text-2xl font-bold font-mono text-zinc-200">
+                                {stats.accuracy}%
+                              </p>
+                              <p className="text-xs text-zinc-500 mt-1">
+                                {stats.correct}/{stats.total} correct
+                              </p>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Prediction Details */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-green-500 uppercase tracking-wider mb-3 flex items-center justify-between">
+                        <span>Prediction Details</span>
+                        <Badge variant="outline" className="text-xs">
+                          {simulationResults.predictions.length} Games
+                        </Badge>
+                      </h3>
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {simulationResults.predictions.map((pred, idx) => (
+                          <div
+                            key={idx}
+                            className={`p-3 rounded-sm border ${
+                              pred.correct
+                                ? 'bg-green-500/5 border-green-500/20'
+                                : 'bg-red-500/5 border-red-500/20'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3 flex-1">
+                                {pred.correct ? (
+                                  <CheckCircle className="w-4 h-4 text-green-500" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-red-500" />
+                                )}
+                                <div>
+                                  <p className="text-sm font-medium text-zinc-200">
+                                    {pred.home_team} vs {pred.away_team}
+                                  </p>
+                                  <p className="text-xs text-zinc-500">
+                                    {pred.match_date}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs">
+                                <div className="text-center">
+                                  <p className="text-zinc-500">Predicted</p>
+                                  <p className="font-mono font-bold text-zinc-300 uppercase">
+                                    {pred.predicted_outcome}
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-zinc-500">Actual</p>
+                                  <p className="font-mono font-bold text-zinc-300 uppercase">
+                                    {pred.actual_result}
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-zinc-500">Score</p>
+                                  <p className="font-mono font-bold text-zinc-300">
+                                    {pred.home_score_actual}-{pred.away_score_actual}
+                                  </p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-zinc-500">Conf</p>
+                                  <ConfidenceBadge score={pred.confidence} />
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-zinc-500">Odds</p>
+                                  <p className="font-mono text-zinc-300">{pred.odds}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!simulationResults && !simulationLoading && (
+                  <div className="text-center py-12">
+                    <BarChart2 className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
+                    <p className="text-zinc-500">Select a model and run simulation to see results</p>
+                    <p className="text-zinc-600 text-sm mt-1">Tests against 20 historical games with known outcomes</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Journal Tab */}
