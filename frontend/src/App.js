@@ -23,6 +23,7 @@ import {
   CheckCircle,
   XCircle,
   BarChart2,
+  HelpCircle,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -46,6 +47,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -152,7 +159,9 @@ const FactorBreakdown = ({ breakdown, teamName }) => {
     travel_distance: "Travel",
     referee_influence: "Referee",
     weather_conditions: "Weather",
-    motivation_level: "Motivation"
+    motivation_level: "Motivation",
+    goals_differential: "Goal Diff",
+    win_rate: "Win Rate"
   };
   
   return (
@@ -188,6 +197,22 @@ const FactorBreakdown = ({ breakdown, teamName }) => {
     </div>
   );
 };
+
+// Tooltip wrapper for numbers with explanations
+const TooltipNumber = ({ value, tooltip, className = "" }) => (
+  <TooltipProvider delayDuration={200}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`cursor-help border-b border-dotted border-zinc-600 ${className}`}>
+          {value}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
+        <p className="text-xs">{tooltip}</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
 
 // ============ MAIN APP ============
 
@@ -884,25 +909,90 @@ function App() {
                                 <p className="text-xs text-zinc-500">{pick.match_date}</p>
                               </td>
                               <td className="p-4 text-center">
-                                <span className="font-mono text-sm text-zinc-300">
-                                  {pick.projected_home_score} - {pick.projected_away_score}
-                                </span>
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="font-mono text-sm text-zinc-300 cursor-help border-b border-dotted border-zinc-600">
+                                        {pick.projected_home_score} - {pick.projected_away_score}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Projected Score Calculation</p>
+                                        <p className="text-xs">Base: 1.5 goals/team (EPL average)</p>
+                                        <p className="text-xs">Home: 1.5 {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(2) || '0.00'} = {pick.projected_home_score}</p>
+                                        <p className="text-xs">Away: 1.5 {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(2) || '0.00'} = {pick.projected_away_score}</p>
+                                        <p className="text-xs text-zinc-400 mt-2 italic">Adjustments from all weighted factors (offense, defense, form, etc.)</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               </td>
                               <td className="p-4 text-center">
                                 <OutcomeBadge outcome={pick.predicted_outcome} />
                               </td>
                               <td className="p-4 text-center">
-                                <span className="font-mono text-sm text-green-400">
-                                  {pick.market_odds.toFixed(2)}
-                                </span>
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="font-mono text-sm text-green-400 cursor-help border-b border-dotted border-green-600">
+                                        {pick.market_odds.toFixed(2)}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Market Odds</p>
+                                        <p className="text-xs">Current bookmaker odds for {pick.predicted_outcome.toUpperCase()}</p>
+                                        <p className="text-xs text-zinc-400 mt-2">All odds:</p>
+                                        <p className="text-xs">Home: {pick.all_market_odds?.home?.toFixed(2)}</p>
+                                        <p className="text-xs">Draw: {pick.all_market_odds?.draw?.toFixed(2)}</p>
+                                        <p className="text-xs">Away: {pick.all_market_odds?.away?.toFixed(2)}</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               </td>
                               <td className="p-4 text-center">
-                                <span className={`font-mono text-sm ${pick.edge_percentage > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
-                                </span>
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className={`font-mono text-sm cursor-help border-b border-dotted ${pick.edge_percentage > 0 ? 'text-green-500 border-green-600' : 'text-red-500 border-red-600'}`}>
+                                        {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Edge Percentage</p>
+                                        <p className="text-xs">Model prob: {pick.model_probability}%</p>
+                                        <p className="text-xs">Market prob: {pick.market_probability}%</p>
+                                        <p className="text-xs text-zinc-400 mt-2 italic">Edge = (Model - Market) / Market × 100</p>
+                                        <p className="text-xs text-zinc-400">Positive edge suggests value bet opportunity</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               </td>
                               <td className="p-4 text-center">
-                                <ConfidenceBadge score={pick.confidence_score} />
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-help">
+                                        <ConfidenceBadge score={pick.confidence_score} />
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Confidence Score (1-10)</p>
+                                        <p className="text-xs font-semibold">{pick.confidence_explanation?.strength || 'N/A'}</p>
+                                        <p className="text-xs text-zinc-300">{pick.confidence_explanation?.reasoning || 'Based on edge and probability'}</p>
+                                        <div className="text-xs text-zinc-400 mt-2 space-y-0.5">
+                                          <p>• Edge: {pick.confidence_explanation?.edge?.toFixed(1)}%</p>
+                                          <p>• Score diff: {pick.confidence_explanation?.score_differential?.toFixed(2)}</p>
+                                        </div>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               </td>
                               <td className="p-4 text-right">
                                 <div className="flex items-center justify-end gap-2">
@@ -934,7 +1024,7 @@ function App() {
                                     <div className="flex items-center justify-between">
                                       <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider flex items-center gap-2">
                                         <Info className="w-4 h-4 text-green-500" />
-                                        Pick Reasoning & Factor Analysis
+                                        Pick Reasoning & Calculation Details
                                       </h4>
                                       <div className="flex items-center gap-4 text-xs">
                                         <div>
@@ -948,41 +1038,127 @@ function App() {
                                       </div>
                                     </div>
                                     
-                                    {/* Confidence Explanation */}
+                                    {/* Calculation Summary Section */}
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                      <div className="bg-gradient-to-br from-green-500/10 to-transparent border border-green-500/30 rounded-lg p-4">
+                                        <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">Score Calculation</h5>
+                                        <div className="space-y-2 text-xs text-zinc-300">
+                                          <div className="flex justify-between">
+                                            <span className="text-zinc-500">Base Score (EPL avg):</span>
+                                            <span className="font-mono">1.50</span>
+                                          </div>
+                                          <div className="flex justify-between border-t border-zinc-700/50 pt-2">
+                                            <span className="text-blue-400">{pick.home_team} Adjustments:</span>
+                                            <span className="font-mono text-blue-400">
+                                              {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(3) || '0.000'}
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between font-semibold text-blue-400">
+                                            <span>{pick.home_team} Final Score:</span>
+                                            <span className="font-mono">{pick.projected_home_score}</span>
+                                          </div>
+                                          <div className="flex justify-between border-t border-zinc-700/50 pt-2">
+                                            <span className="text-orange-400">{pick.away_team} Adjustments:</span>
+                                            <span className="font-mono text-orange-400">
+                                              {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(3) || '0.000'}
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between font-semibold text-orange-400">
+                                            <span>{pick.away_team} Final Score:</span>
+                                            <span className="font-mono">{pick.projected_away_score}</span>
+                                          </div>
+                                        </div>
+                                        <p className="text-xs text-zinc-500 italic mt-3">
+                                          Adjustments come from weighted factors: offense, defense, form, injuries, home advantage, etc.
+                                        </p>
+                                      </div>
+
+                                      <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/30 rounded-lg p-4">
+                                        <h5 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">Confidence Breakdown</h5>
+                                        <div className="space-y-2 text-xs text-zinc-300">
+                                          <div className="flex justify-between">
+                                            <span className="text-zinc-500">Confidence Score:</span>
+                                            <span className="font-mono font-bold text-green-400">{pick.confidence_score}/10</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-zinc-500">Strength:</span>
+                                            <span className="font-semibold">{pick.confidence_explanation?.strength || 'N/A'}</span>
+                                          </div>
+                                          <div className="border-t border-zinc-700/50 pt-2 space-y-1">
+                                            <p className="text-zinc-400">{pick.confidence_explanation?.reasoning || 'Based on edge and probabilities'}</p>
+                                          </div>
+                                          <div className="border-t border-zinc-700/50 pt-2 space-y-1">
+                                            <div className="flex justify-between">
+                                              <span className="text-zinc-500">Edge:</span>
+                                              <span className={`font-mono ${pick.edge_percentage > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
+                                              </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                              <span className="text-zinc-500">Score Differential:</span>
+                                              <span className="font-mono">{Math.abs(pick.projected_home_score - pick.projected_away_score).toFixed(2)}</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <p className="text-xs text-zinc-500 italic mt-3">
+                                          Confidence considers edge %, model probability strength, and score clarity
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* All Outcome Probabilities */}
                                     <div className="bg-zinc-800/50 border border-zinc-700/50 rounded p-4">
-                                      <p className="text-xs text-zinc-400 mb-2">
-                                        <span className="font-semibold text-green-500">Why this pick?</span> Our model gives this outcome a 
-                                        <span className="font-mono font-semibold text-green-400 mx-1">{pick.model_probability}%</span>
-                                        chance of occurring, while the market implies only
-                                        <span className="font-mono font-semibold text-zinc-400 mx-1">{pick.market_probability}%</span>.
-                                        This creates an edge of
-                                        <span className="font-mono font-semibold text-green-500 mx-1">{pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%</span>,
-                                        resulting in a confidence score of
-                                        <span className="font-mono font-semibold text-green-500 mx-1">{pick.confidence_score}/10</span>.
-                                      </p>
+                                      <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">All Outcome Probabilities</h5>
+                                      <div className="grid grid-cols-3 gap-4 text-xs">
+                                        <div className="text-center">
+                                          <p className="text-zinc-500 mb-2">HOME WIN</p>
+                                          <p className="font-mono text-sm text-blue-400 mb-1">{pick.all_probabilities?.home || 0}%</p>
+                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.home).toFixed(1)}%</p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500 mb-2">DRAW</p>
+                                          <p className="font-mono text-sm text-zinc-400 mb-1">{pick.all_probabilities?.draw || 0}%</p>
+                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.draw).toFixed(1)}%</p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500 mb-2">AWAY WIN</p>
+                                          <p className="font-mono text-sm text-orange-400 mb-1">{pick.all_probabilities?.away || 0}%</p>
+                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.away).toFixed(1)}%</p>
+                                        </div>
+                                      </div>
                                     </div>
                                     
                                     {/* Factor Breakdowns */}
-                                    <div className="grid md:grid-cols-2 gap-6">
-                                      <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
-                                        <FactorBreakdown 
-                                          breakdown={pick.home_breakdown} 
-                                          teamName={`${pick.home_team} (Home)`}
-                                        />
-                                      </div>
-                                      <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
-                                        <FactorBreakdown 
-                                          breakdown={pick.away_breakdown} 
-                                          teamName={`${pick.away_team} (Away)`}
-                                        />
+                                    <div>
+                                      <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">Factor-by-Factor Breakdown</h5>
+                                      <div className="grid md:grid-cols-2 gap-6">
+                                        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+                                          <FactorBreakdown 
+                                            breakdown={pick.home_breakdown} 
+                                            teamName={`${pick.home_team} (Home)`}
+                                          />
+                                        </div>
+                                        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+                                          <FactorBreakdown 
+                                            breakdown={pick.away_breakdown} 
+                                            teamName={`${pick.away_team} (Away)`}
+                                          />
+                                        </div>
                                       </div>
                                     </div>
                                     
                                     {/* Summary */}
                                     <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
-                                      💡 Each factor's contribution is calculated by multiplying its weight (set in your model) 
-                                      by the team's rating for that factor. Positive contributions increase the projected score, 
-                                      while negative ones (like injuries or travel distance) decrease it.
+                                      💡 <span className="font-semibold">How it works:</span> Each factor's contribution = (team rating - baseline) × factor weight × multiplier. 
+                                      Positive contributions increase the projected score. The final score determines outcome probabilities, 
+                                      which are compared to market odds to find value bets.
+                                    </div>
+                                    
+                                    {/* Summary */}
+                                    <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
+                                      💡 <span className="font-semibold">How it works:</span> Each factor's contribution = (team rating - baseline) × factor weight × multiplier. 
+                                      Positive contributions increase the projected score. The final score determines outcome probabilities, 
+                                      which are compared to market odds to find value bets.
                                     </div>
                                   </div>
                                 </td>
