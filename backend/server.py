@@ -313,6 +313,10 @@ MOCK_GAMES, EPL_TEAMS = generate_fixtures()
 # Generate historical games with completed results for simulation
 HISTORICAL_GAMES = []
 
+# Store API games globally
+API_GAMES = []
+API_TEAMS = {}
+
 def generate_historical_games(count=20):
     """Generate historical games with completed results for backtesting"""
     global HISTORICAL_GAMES
@@ -405,10 +409,121 @@ generate_historical_games()
 FOOTBALL_API_KEY = os.environ.get('FOOTBALL_API_KEY', '')  # Get from env or leave empty
 FOOTBALL_API_URL = "https://api.football-data.org/v4"
 
+def calculate_team_stats_from_matches(matches):
+    """Calculate team statistics from match history"""
+    team_stats = {}
+    
+    for match in matches:
+        if match.get("is_completed") and match.get("home_score") is not None:
+            home_team = match["home"]
+            away_team = match["away"]
+            home_score = match["home_score"]
+            away_score = match["away_score"]
+            
+            # Initialize teams if not exists
+            if home_team not in team_stats:
+                team_stats[home_team] = {
+                    "goals_scored": 0,
+                    "goals_conceded": 0,
+                    "matches": 0,
+                    "wins": 0,
+                    "draws": 0,
+                    "losses": 0,
+                    "home_matches": 0,
+                    "home_wins": 0
+                }
+            if away_team not in team_stats:
+                team_stats[away_team] = {
+                    "goals_scored": 0,
+                    "goals_conceded": 0,
+                    "matches": 0,
+                    "wins": 0,
+                    "draws": 0,
+                    "losses": 0,
+                    "home_matches": 0,
+                    "home_wins": 0
+                }
+            
+            # Update home team stats
+            team_stats[home_team]["goals_scored"] += home_score
+            team_stats[home_team]["goals_conceded"] += away_score
+            team_stats[home_team]["matches"] += 1
+            team_stats[home_team]["home_matches"] += 1
+            
+            # Update away team stats
+            team_stats[away_team]["goals_scored"] += away_score
+            team_stats[away_team]["goals_conceded"] += home_score
+            team_stats[away_team]["matches"] += 1
+            
+            # Update win/draw/loss
+            if home_score > away_score:
+                team_stats[home_team]["wins"] += 1
+                team_stats[home_team]["home_wins"] += 1
+                team_stats[away_team]["losses"] += 1
+            elif away_score > home_score:
+                team_stats[away_team]["wins"] += 1
+                team_stats[home_team]["losses"] += 1
+            else:
+                team_stats[home_team]["draws"] += 1
+                team_stats[away_team]["draws"] += 1
+    
+    # Convert to ratings (0-100 scale)
+    teams = {}
+    for team_name, stats in team_stats.items():
+        if stats["matches"] > 0:
+            # Offense rating based on goals scored per match (scale 0-3 goals to 50-95)
+            avg_goals = stats["goals_scored"] / stats["matches"]
+            offense = min(95, max(50, 50 + (avg_goals * 15)))
+            
+            # Defense rating based on goals conceded per match (inverse scale)
+            avg_conceded = stats["goals_conceded"] / stats["matches"]
+            defense = min(95, max(50, 95 - (avg_conceded * 15)))
+            
+            # Form rating based on win percentage
+            win_rate = stats["wins"] / stats["matches"]
+            form = min(95, max(40, 40 + (win_rate * 55)))
+            
+            # Injury impact - random for now since not in API
+            injury = random.randint(0, 20)
+            
+            # Additional factors
+            rest_days = random.randint(3, 7)
+            motivation = min(95, max(60, 60 + (win_rate * 35)))
+            referee_rating = random.randint(70, 85)
+            
+            teams[team_name] = {
+                "short": team_name[:3].upper(),
+                "offense": round(offense, 1),
+                "defense": round(defense, 1),
+                "form": round(form, 1),
+                "injury": round(injury, 1),
+                "rest_days": rest_days,
+                "motivation": round(motivation, 1),
+                "referee_rating": referee_rating,
+                "stats": stats  # Keep raw stats for reference
+            }
+        else:
+            # Default values for teams with no completed matches
+            teams[team_name] = {
+                "short": team_name[:3].upper(),
+                "offense": 70.0,
+                "defense": 70.0,
+                "form": 70.0,
+                "injury": 10.0,
+                "rest_days": 4,
+                "motivation": 75.0,
+                "referee_rating": 75
+            }
+    
+    return teams
+
 async def fetch_epl_fixtures_from_api():
-    """Fetch real EPL fixtures from football-data.org API"""
+    """Fetch real EPL fixtures from football-data.org API and update global state"""
+    global API_GAMES, API_TEAMS
+    
     if not FOOTBALL_API_KEY:
-        return []
+        logger.info("No Football API key found, using mock data")
+        return False
     
     try:
         import httpx
@@ -416,40 +531,42 @@ async def fetch_epl_fixtures_from_api():
         
         async with httpx.AsyncClient() as client:
             # EPL competition code is 'PL' (Premier League)
+            # Fetch both scheduled and finished matches
             response = await client.get(
                 f"{FOOTBALL_API_URL}/competitions/PL/matches",
                 headers=headers,
-                params={"status": "SCHEDULED,FINISHED"},
-                timeout=10.0
+                params={"status": "SCHEDULED,TIMED,IN_PLAY,PAUSED,FINISHED"},
+                timeout=15.0
             )
             
             if response.status_code != 200:
-                logger.error(f"Football API error: {response.status_code}")
-                return []
+                logger.error(f"Football API error: {response.status_code} - {response.text}")
+                return False
             
             data = response.json()
             matches = data.get("matches", [])
             
-            games = []
-            for match in matches[:10]:  # Limit to 10 games
+            if not matches:
+                logger.warning("No matches returned from API")
+                return False
+            
+            logger.info(f"Fetched {len(matches)} matches from Football API")
+            
+            # Separate finished and upcoming matches
+            finished_matches = []
+            upcoming_matches = []
+            
+            for match in matches:
                 home_team = match["homeTeam"]["name"]
                 away_team = match["awayTeam"]["name"]
                 match_date = match["utcDate"]
                 status = match["status"]
-                
-                # Generate or fetch odds (API doesn't provide odds in free tier)
-                home_strength = random.randint(70, 90)
-                away_strength = random.randint(70, 90)
-                h_odds, d_odds, a_odds = generate_odds(home_strength, away_strength)
                 
                 game = {
                     "id": f"api-{match['id']}",
                     "home": home_team,
                     "away": away_team,
                     "date": match_date,
-                    "h_odds": h_odds,
-                    "d_odds": d_odds,
-                    "a_odds": a_odds,
                     "head_to_head_home": 50,
                     "weather_rating": 80,
                     "travel_distance": random.randint(50, 400),
@@ -474,13 +591,64 @@ async def fetch_epl_fixtures_from_api():
                             game["result"] = "away"
                         else:
                             game["result"] = "draw"
-                
-                games.append(game)
+                        
+                        finished_matches.append(game)
+                else:
+                    upcoming_matches.append(game)
             
-            return games
+            # Calculate team stats from finished matches
+            logger.info(f"Calculating team stats from {len(finished_matches)} completed matches")
+            API_TEAMS = calculate_team_stats_from_matches(finished_matches)
+            
+            # Generate odds for upcoming matches based on team stats
+            for game in upcoming_matches:
+                home_team = game["home"]
+                away_team = game["away"]
+                
+                # Get team stats or use defaults
+                home_stats = API_TEAMS.get(home_team, {"offense": 70, "defense": 70, "form": 70})
+                away_stats = API_TEAMS.get(away_team, {"offense": 70, "defense": 70, "form": 70})
+                
+                # Calculate strength based on stats
+                home_strength = (home_stats["offense"] + home_stats["form"]) / 2
+                away_strength = (away_stats["offense"] + away_stats["form"]) / 2
+                
+                h_odds, d_odds, a_odds = generate_odds(home_strength, away_strength)
+                game["h_odds"] = h_odds
+                game["d_odds"] = d_odds
+                game["a_odds"] = a_odds
+            
+            # Also add odds to finished matches for historical analysis
+            for game in finished_matches:
+                home_team = game["home"]
+                away_team = game["away"]
+                home_stats = API_TEAMS.get(home_team, {"offense": 70, "defense": 70, "form": 70})
+                away_stats = API_TEAMS.get(away_team, {"offense": 70, "defense": 70, "form": 70})
+                home_strength = (home_stats["offense"] + home_stats["form"]) / 2
+                away_strength = (away_stats["offense"] + away_stats["form"]) / 2
+                h_odds, d_odds, a_odds = generate_odds(home_strength, away_strength)
+                game["h_odds"] = h_odds
+                game["d_odds"] = d_odds
+                game["a_odds"] = a_odds
+            
+            # Store upcoming matches (limit to 15 for display)
+            API_GAMES = upcoming_matches[:15]
+            
+            # Store finished matches as historical data for simulation
+            global HISTORICAL_GAMES
+            HISTORICAL_GAMES = finished_matches[-30:]  # Keep last 30 completed matches
+            
+            logger.info(f"Updated API_GAMES with {len(API_GAMES)} upcoming matches")
+            logger.info(f"Updated HISTORICAL_GAMES with {len(HISTORICAL_GAMES)} completed matches")
+            logger.info(f"Calculated stats for {len(API_TEAMS)} teams")
+            
+            return True
+            
     except Exception as e:
         logger.error(f"Error fetching from Football API: {e}")
-        return []
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
 
 PRESET_MODELS = [
     {
@@ -523,7 +691,8 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     """Calculate projected score for a team based on model weights
     Returns: (score, factor_breakdown)
     """
-    team = EPL_TEAMS.get(team_name, {})
+    # Try API teams first, then mock teams
+    team = API_TEAMS.get(team_name) or EPL_TEAMS.get(team_name, {})
     if not team:
         return 1.5, {}
     
@@ -705,38 +874,182 @@ def calculate_outcome_probabilities(home_score: float, away_score: float) -> dic
 
 @api_router.get("/")
 async def root():
-    return {"message": "BetGenius EPL API", "version": "1.0.0"}
+    return {
+        "message": "BetGenius EPL API",
+        "version": "1.0.0",
+        "data_source": "api" if API_GAMES else "mock",
+        "games_loaded": len(API_GAMES) if API_GAMES else len(MOCK_GAMES),
+        "teams_loaded": len(API_TEAMS) if API_TEAMS else len(EPL_TEAMS)
+    }
 
 # ---- Teams ----
 @api_router.get("/teams")
 async def get_teams():
     teams = []
-    for name, data in EPL_TEAMS.items():
+    
+    # Use API teams if available, otherwise use mock teams
+    source_teams = API_TEAMS if API_TEAMS else EPL_TEAMS
+    
+    for name, data in source_teams.items():
         teams.append({
             "name": name,
-            "short_name": data["short"],
-            "offense_rating": data["offense"],
-            "defense_rating": data["defense"],
-            "form_rating": data["form"],
-            "injury_impact": data["injury"]
+            "short_name": data.get("short", name[:3].upper()),
+            "offense_rating": data.get("offense", 70),
+            "defense_rating": data.get("defense", 70),
+            "form_rating": data.get("form", 70),
+            "injury_impact": data.get("injury", 10)
         })
     return teams
 
 @api_router.post("/refresh-data")
 async def refresh_data():
-    """Regenerate all fixtures and team data"""
-    global MOCK_GAMES, EPL_TEAMS
-    MOCK_GAMES, EPL_TEAMS = generate_fixtures()
-    return {"message": "Data refreshed", "games": len(MOCK_GAMES), "teams": len(EPL_TEAMS)}
+    """Fetch fresh data from API, fallback to regenerating mock data"""
+    success = await fetch_epl_fixtures_from_api()
+    
+    if success:
+        return {
+            "message": "Data refreshed from Football API",
+            "games": len(API_GAMES),
+            "teams": len(API_TEAMS),
+            "historical_games": len(HISTORICAL_GAMES),
+            "source": "api"
+        }
+    else:
+        # Fallback: regenerate mock data
+        global MOCK_GAMES, EPL_TEAMS
+        MOCK_GAMES, EPL_TEAMS = generate_fixtures()
+        return {
+            "message": "API unavailable, regenerated mock data",
+            "games": len(MOCK_GAMES),
+            "teams": len(EPL_TEAMS),
+            "source": "mock"
+        }
 
 # ---- Games ----
 @api_router.get("/games")
-async def get_games(include_historical: bool = False, source: str = "all"):
-    """Get games - upcoming by default, can include historical and filter by source"""
+async def get_games(include_historical: bool = False, source: str = "auto"):
+    """Get games - tries API first, falls back to mock if API unavailable
+    source: 'auto' (default - tries API first), 'api', 'mock', 'all'
+    """
     games = []
     
-    # Add upcoming games
-    if source in ["all", "mock"]:
+    # Auto mode: Try API first, fallback to mock
+    if source == "auto":
+        if API_GAMES:
+            # Use cached API games
+            for g in API_GAMES:
+                home_data = API_TEAMS.get(g["home"], {})
+                away_data = API_TEAMS.get(g["away"], {})
+                games.append({
+                    "id": g["id"],
+                    "home_team": g["home"],
+                    "away_team": g["away"],
+                    "match_date": g["date"],
+                    "home_odds": g.get("h_odds", 2.0),
+                    "draw_odds": g.get("d_odds", 3.0),
+                    "away_odds": g.get("a_odds", 3.0),
+                    "home_team_data": home_data,
+                    "away_team_data": away_data,
+                    "result": g.get("result"),
+                    "home_score": g.get("home_score"),
+                    "away_score": g.get("away_score"),
+                    "is_completed": g.get("is_completed", False),
+                    "data_source": "api",
+                    "api_id": g.get("api_id")
+                })
+        else:
+            # Fallback to mock data
+            logger.info("No API data available, using mock data")
+            for i, g in enumerate(MOCK_GAMES):
+                home_data = EPL_TEAMS.get(g["home"], {})
+                away_data = EPL_TEAMS.get(g["away"], {})
+                games.append({
+                    "id": f"game-{i+1}",
+                    "home_team": g["home"],
+                    "away_team": g["away"],
+                    "match_date": g["date"],
+                    "home_odds": g["h_odds"],
+                    "draw_odds": g["d_odds"],
+                    "away_odds": g["a_odds"],
+                    "home_team_data": home_data,
+                    "away_team_data": away_data,
+                    "result": None,
+                    "home_score": None,
+                    "away_score": None,
+                    "is_completed": False,
+                    "data_source": "mock"
+                })
+    
+    # API mode: Only API data
+    elif source == "api":
+        for g in API_GAMES:
+            home_data = API_TEAMS.get(g["home"], {})
+            away_data = API_TEAMS.get(g["away"], {})
+            games.append({
+                "id": g["id"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "home_odds": g.get("h_odds", 2.0),
+                "draw_odds": g.get("d_odds", 3.0),
+                "away_odds": g.get("a_odds", 3.0),
+                "home_team_data": home_data,
+                "away_team_data": away_data,
+                "result": g.get("result"),
+                "home_score": g.get("home_score"),
+                "away_score": g.get("away_score"),
+                "is_completed": g.get("is_completed", False),
+                "data_source": "api",
+                "api_id": g.get("api_id")
+            })
+    
+    # Mock mode: Only mock data
+    elif source == "mock":
+        for i, g in enumerate(MOCK_GAMES):
+            home_data = EPL_TEAMS.get(g["home"], {})
+            away_data = EPL_TEAMS.get(g["away"], {})
+            games.append({
+                "id": f"game-{i+1}",
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "home_odds": g["h_odds"],
+                "draw_odds": g["d_odds"],
+                "away_odds": g["a_odds"],
+                "home_team_data": home_data,
+                "away_team_data": away_data,
+                "result": None,
+                "home_score": None,
+                "away_score": None,
+                "is_completed": False,
+                "data_source": "mock"
+            })
+    
+    # All mode: Both API and mock
+    elif source == "all":
+        # Add API games
+        for g in API_GAMES:
+            home_data = API_TEAMS.get(g["home"], {})
+            away_data = API_TEAMS.get(g["away"], {})
+            games.append({
+                "id": g["id"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "home_odds": g.get("h_odds", 2.0),
+                "draw_odds": g.get("d_odds", 3.0),
+                "away_odds": g.get("a_odds", 3.0),
+                "home_team_data": home_data,
+                "away_team_data": away_data,
+                "result": g.get("result"),
+                "home_score": g.get("home_score"),
+                "away_score": g.get("away_score"),
+                "is_completed": g.get("is_completed", False),
+                "data_source": "api",
+                "api_id": g.get("api_id")
+            })
+        
+        # Add mock games
         for i, g in enumerate(MOCK_GAMES):
             home_data = EPL_TEAMS.get(g["home"], {})
             away_data = EPL_TEAMS.get(g["away"], {})
@@ -758,47 +1071,31 @@ async def get_games(include_historical: bool = False, source: str = "all"):
             })
     
     # Add historical games if requested
-    if include_historical and source in ["all", "mock"]:
+    if include_historical:
         for g in HISTORICAL_GAMES:
-            home_data = EPL_TEAMS.get(g["home"], {})
-            away_data = EPL_TEAMS.get(g["away"], {})
+            # Check if using API teams or mock teams
+            if g.get("data_source") == "api":
+                home_data = API_TEAMS.get(g["home"], {})
+                away_data = API_TEAMS.get(g["away"], {})
+            else:
+                home_data = EPL_TEAMS.get(g["home"], {})
+                away_data = EPL_TEAMS.get(g["away"], {})
+            
             games.append({
                 "id": g["id"],
                 "home_team": g["home"],
                 "away_team": g["away"],
                 "match_date": g["date"],
-                "home_odds": g["h_odds"],
-                "draw_odds": g["d_odds"],
-                "away_odds": g["a_odds"],
+                "home_odds": g.get("h_odds", 2.0),
+                "draw_odds": g.get("d_odds", 3.0),
+                "away_odds": g.get("a_odds", 3.0),
                 "home_team_data": home_data,
                 "away_team_data": away_data,
                 "result": g.get("result"),
                 "home_score": g.get("home_score"),
                 "away_score": g.get("away_score"),
                 "is_completed": g.get("is_completed", False),
-                "data_source": "mock"
-            })
-    
-    # Fetch from API if requested
-    if source in ["all", "api"]:
-        api_games = await fetch_epl_fixtures_from_api()
-        for g in api_games:
-            games.append({
-                "id": g["id"],
-                "home_team": g["home"],
-                "away_team": g["away"],
-                "match_date": g["date"],
-                "home_odds": g["h_odds"],
-                "draw_odds": g["d_odds"],
-                "away_odds": g["a_odds"],
-                "home_team_data": {},
-                "away_team_data": {},
-                "result": g.get("result"),
-                "home_score": g.get("home_score"),
-                "away_score": g.get("away_score"),
-                "is_completed": g.get("is_completed", False),
-                "data_source": "api",
-                "api_id": g.get("api_id")
+                "data_source": g.get("data_source", "mock")
             })
     
     return games
@@ -882,7 +1179,11 @@ async def generate_picks(model_id: str):
     weights = model["weights"]
     picks = []
     
-    for i, g in enumerate(MOCK_GAMES):
+    # Use API games if available, otherwise use mock games
+    games_to_analyze = API_GAMES if API_GAMES else MOCK_GAMES
+    teams_data = API_TEAMS if API_TEAMS else EPL_TEAMS
+    
+    for i, g in enumerate(games_to_analyze):
         # Calculate scores with factor breakdown
         home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
         away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
@@ -891,21 +1192,31 @@ async def generate_picks(model_id: str):
         
         # Convert market odds to implied probabilities
         market_probs = {
-            "home": 1 / g["h_odds"],
-            "draw": 1 / g["d_odds"],
-            "away": 1 / g["a_odds"]
+            "home": 1 / g.get("h_odds", 2.0),
+            "draw": 1 / g.get("d_odds", 3.0),
+            "away": 1 / g.get("a_odds", 3.0)
         }
         
         # Find best value bet
         best_outcome = max(probs.keys(), key=lambda k: probs[k] - market_probs[k])
         edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
         
-        market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
+        market_odds = {
+            "home": g.get("h_odds", 2.0),
+            "draw": g.get("d_odds", 3.0),
+            "away": g.get("a_odds", 3.0)
+        }[best_outcome]
         confidence = calculate_confidence(probs[best_outcome], market_probs[best_outcome])
         
+        # Generate pick ID based on data source
+        if g.get("data_source") == "api":
+            pick_id = f"pick-{model_id}-{g['id']}"
+        else:
+            pick_id = f"pick-{model_id}-game-{i+1}"
+        
         pick = {
-            "id": f"pick-{model_id}-game-{i+1}",
-            "game_id": f"game-{i+1}",
+            "id": pick_id,
+            "game_id": g.get("id", f"game-{i+1}"),
             "model_id": model_id,
             "model_name": model["name"],
             "home_team": g["home"],
@@ -921,7 +1232,8 @@ async def generate_picks(model_id: str):
             "market_probability": round(market_probs[best_outcome] * 100, 1),
             "home_breakdown": home_breakdown,
             "away_breakdown": away_breakdown,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "data_source": g.get("data_source", "mock")
         }
         picks.append(pick)
     
@@ -1212,3 +1524,13 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+@app.on_event("startup")
+async def startup_fetch_api_data():
+    """Fetch data from API on server startup"""
+    logger.info("Fetching initial data from Football API...")
+    success = await fetch_epl_fixtures_from_api()
+    if success:
+        logger.info(f"Successfully loaded {len(API_GAMES)} games from API")
+    else:
+        logger.warning("Failed to load API data, mock data will be used as fallback")
