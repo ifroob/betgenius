@@ -198,6 +198,238 @@ const FactorBreakdown = ({ breakdown, teamName }) => {
   );
 };
 
+// xG Poisson Model Display Component
+const PoissonModelDisplay = ({ pick }) => {
+  const xgBreakdown = pick.xg_breakdown;
+  if (!xgBreakdown) return null;
+
+  return (
+    <div className="space-y-6">
+      {/* Model Type Badge */}
+      <div className="flex items-center gap-2">
+        <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40">
+          xG POISSON MODEL
+        </Badge>
+        <span className="text-xs text-zinc-500">Advanced statistical prediction using Expected Goals</span>
+      </div>
+
+      {/* Poisson Formula */}
+      <div className="bg-gradient-to-br from-purple-500/10 to-transparent border border-purple-500/30 rounded-lg p-4">
+        <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <HelpCircle className="w-4 h-4" />
+          Poisson Formula
+        </h5>
+        <div className="space-y-3">
+          <div className="bg-zinc-900/50 border border-zinc-700 rounded p-3 font-mono text-sm text-zinc-200 text-center">
+            P(k goals) = (e<sup>-λ</sup> × λ<sup>k</sup>) / k!
+          </div>
+          <p className="text-xs text-zinc-400 italic">
+            Where λ (lambda) is the expected number of goals. This formula calculates the probability of scoring exactly k goals.
+          </p>
+        </div>
+      </div>
+
+      {/* Lambda Calculations */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/30 rounded-lg p-4">
+          <h5 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">
+            {pick.home_team} Expected Goals (λ)
+          </h5>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between items-center">
+              <span className="text-zinc-400">Lambda (λ):</span>
+              <span className="font-mono font-bold text-2xl text-blue-400">{pick.projected_home_score}</span>
+            </div>
+            <div className="border-t border-zinc-700/50 pt-2 mt-2">
+              <p className="text-zinc-500 font-semibold mb-2">Calculation:</p>
+              <div className="space-y-1 text-zinc-400">
+                <div className="flex justify-between">
+                  <span>League Avg (Home):</span>
+                  <span className="font-mono">{xgBreakdown.league_averages?.home || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Attack Strength:</span>
+                  <span className="font-mono text-green-400">{xgBreakdown.home_team?.attack_strength || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Opponent Def Strength:</span>
+                  <span className="font-mono text-red-400">{xgBreakdown.away_team?.defense_strength || 0}</span>
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-zinc-700/50 bg-zinc-900/50 p-2 rounded">
+                <span className="text-zinc-500">λ_home = </span>
+                <span className="font-mono text-zinc-200">
+                  {xgBreakdown.league_averages?.home || 0} × {xgBreakdown.home_team?.attack_strength || 0} × {xgBreakdown.away_team?.defense_strength || 0}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-zinc-500 italic">
+              Data: {xgBreakdown.home_team?.matches || 0} matches analyzed
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-orange-500/10 to-transparent border border-orange-500/30 rounded-lg p-4">
+          <h5 className="text-xs font-semibold text-orange-400 uppercase tracking-wider mb-3">
+            {pick.away_team} Expected Goals (λ)
+          </h5>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between items-center">
+              <span className="text-zinc-400">Lambda (λ):</span>
+              <span className="font-mono font-bold text-2xl text-orange-400">{pick.projected_away_score}</span>
+            </div>
+            <div className="border-t border-zinc-700/50 pt-2 mt-2">
+              <p className="text-zinc-500 font-semibold mb-2">Calculation:</p>
+              <div className="space-y-1 text-zinc-400">
+                <div className="flex justify-between">
+                  <span>League Avg (Away):</span>
+                  <span className="font-mono">{xgBreakdown.league_averages?.away || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Attack Strength:</span>
+                  <span className="font-mono text-green-400">{xgBreakdown.away_team?.attack_strength || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Opponent Def Strength:</span>
+                  <span className="font-mono text-red-400">{xgBreakdown.home_team?.defense_strength || 0}</span>
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-zinc-700/50 bg-zinc-900/50 p-2 rounded">
+                <span className="text-zinc-500">λ_away = </span>
+                <span className="font-mono text-zinc-200">
+                  {xgBreakdown.league_averages?.away || 0} × {xgBreakdown.away_team?.attack_strength || 0} × {xgBreakdown.home_team?.defense_strength || 0}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-zinc-500 italic">
+              Data: {xgBreakdown.away_team?.matches || 0} matches analyzed
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Step-by-Step Calculation */}
+      {xgBreakdown.calculation_steps && (
+        <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+          <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">
+            Step-by-Step Calculation Process
+          </h5>
+          <div className="space-y-2">
+            {Object.entries(xgBreakdown.calculation_steps).map(([step, description]) => (
+              <div key={step} className="flex gap-3 text-xs">
+                <span className="text-green-500 font-semibold min-w-[60px]">{step.replace('step_', 'Step ')}:</span>
+                <span className="text-zinc-400 font-mono">{description}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Team xG Statistics */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+          <h5 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">
+            {pick.home_team} xG Stats
+          </h5>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-zinc-400">xG per match:</span>
+              <span className="font-mono text-green-400">{xgBreakdown.home_team?.xG_per_match || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-400">xGA per match:</span>
+              <span className="font-mono text-red-400">{xgBreakdown.home_team?.xGA_per_match || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-400">Attack strength:</span>
+              <span className="font-mono text-blue-400">{xgBreakdown.home_team?.attack_strength || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-400">Defense strength:</span>
+              <span className="font-mono text-blue-400">{xgBreakdown.home_team?.defense_strength || 0}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+          <h5 className="text-xs font-semibold text-orange-400 uppercase tracking-wider mb-3">
+            {pick.away_team} xG Stats
+          </h5>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-zinc-400">xG per match:</span>
+              <span className="font-mono text-green-400">{xgBreakdown.away_team?.xG_per_match || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-400">xGA per match:</span>
+              <span className="font-mono text-red-400">{xgBreakdown.away_team?.xGA_per_match || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-400">Attack strength:</span>
+              <span className="font-mono text-orange-400">{xgBreakdown.away_team?.attack_strength || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-400">Defense strength:</span>
+              <span className="font-mono text-orange-400">{xgBreakdown.away_team?.defense_strength || 0}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* League Context */}
+      <div className="bg-gradient-to-br from-green-500/10 to-transparent border border-green-500/30 rounded-lg p-4">
+        <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">
+          League Context (EPL Averages)
+        </h5>
+        <div className="grid grid-cols-3 gap-4 text-xs text-center">
+          <div>
+            <p className="text-zinc-500 mb-1">Overall</p>
+            <p className="font-mono text-lg text-zinc-200">{xgBreakdown.league_averages?.overall || 0}</p>
+            <p className="text-zinc-600 text-xs">goals/match</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 mb-1">Home Teams</p>
+            <p className="font-mono text-lg text-blue-400">{xgBreakdown.league_averages?.home || 0}</p>
+            <p className="text-zinc-600 text-xs">goals/match</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 mb-1">Away Teams</p>
+            <p className="font-mono text-lg text-orange-400">{xgBreakdown.league_averages?.away || 0}</p>
+            <p className="text-zinc-600 text-xs">goals/match</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Outcome Probabilities from Poisson */}
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded p-4">
+        <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">
+          Poisson Outcome Probabilities
+        </h5>
+        <div className="grid grid-cols-3 gap-4 text-xs">
+          <div className="text-center p-3 bg-blue-500/10 rounded border border-blue-500/30">
+            <p className="text-zinc-500 mb-2">HOME WIN</p>
+            <p className="font-mono text-2xl text-blue-400 mb-1">{pick.all_probabilities?.home || 0}%</p>
+            <p className="text-zinc-600 text-xs">vs Market: {(100 / pick.all_market_odds?.home).toFixed(1)}%</p>
+          </div>
+          <div className="text-center p-3 bg-zinc-500/10 rounded border border-zinc-500/30">
+            <p className="text-zinc-500 mb-2">DRAW</p>
+            <p className="font-mono text-2xl text-zinc-400 mb-1">{pick.all_probabilities?.draw || 0}%</p>
+            <p className="text-zinc-600 text-xs">vs Market: {(100 / pick.all_market_odds?.draw).toFixed(1)}%</p>
+          </div>
+          <div className="text-center p-3 bg-orange-500/10 rounded border border-orange-500/30">
+            <p className="text-zinc-500 mb-2">AWAY WIN</p>
+            <p className="font-mono text-2xl text-orange-400 mb-1">{pick.all_probabilities?.away || 0}%</p>
+            <p className="text-zinc-600 text-xs">vs Market: {(100 / pick.all_market_odds?.away).toFixed(1)}%</p>
+          </div>
+        </div>
+        <p className="text-xs text-zinc-500 italic mt-3 text-center">
+          Calculated by evaluating all possible score combinations using Poisson distribution
+        </p>
+      </div>
+    </div>
+  );
+};
+
 // Tooltip wrapper for numbers with explanations
 const TooltipNumber = ({ value, tooltip, className = "" }) => (
   <TooltipProvider delayDuration={200}>
@@ -967,22 +1199,33 @@ function App() {
                           <>
                             <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
                               <td className="p-4">
-                                <p className="text-sm font-medium text-zinc-200">
-                                  <button
-                                    onClick={() => handleTeamClick(pick.home_team)}
-                                    className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
-                                  >
-                                    {pick.home_team}
-                                  </button>
-                                  {' vs '}
-                                  <button
-                                    onClick={() => handleTeamClick(pick.away_team)}
-                                    className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
-                                  >
-                                    {pick.away_team}
-                                  </button>
-                                </p>
-                                <p className="text-xs text-zinc-500">{pick.match_date}</p>
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-zinc-200">
+                                    <button
+                                      onClick={() => handleTeamClick(pick.home_team)}
+                                      className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                                      data-testid={`team-link-${pick.home_team}`}
+                                    >
+                                      {pick.home_team}
+                                    </button>
+                                    {' vs '}
+                                    <button
+                                      onClick={() => handleTeamClick(pick.away_team)}
+                                      className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                                      data-testid={`team-link-${pick.away_team}`}
+                                    >
+                                      {pick.away_team}
+                                    </button>
+                                  </p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs text-zinc-500">{pick.match_date}</p>
+                                    {pick.model_type === "xg_poisson" && (
+                                      <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40 text-xs">
+                                        xG Poisson
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
                               </td>
                               <td className="p-4 text-center">
                                 <TooltipProvider delayDuration={200}>
@@ -994,11 +1237,24 @@ function App() {
                                     </TooltipTrigger>
                                     <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
                                       <div className="space-y-1">
-                                        <p className="font-semibold text-green-400">Projected Score Calculation</p>
-                                        <p className="text-xs">Base: 1.5 goals/team (EPL average)</p>
-                                        <p className="text-xs">Home: 1.5 {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(2) || '0.00'} = {pick.projected_home_score}</p>
-                                        <p className="text-xs">Away: 1.5 {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(2) || '0.00'} = {pick.projected_away_score}</p>
-                                        <p className="text-xs text-zinc-400 mt-2 italic">Adjustments from all weighted factors (offense, defense, form, etc.)</p>
+                                        {pick.model_type === "xg_poisson" ? (
+                                          <>
+                                            <p className="font-semibold text-purple-400">xG Poisson Expected Goals (λ)</p>
+                                            <p className="text-xs">Home λ: {pick.projected_home_score}</p>
+                                            <p className="text-xs">Away λ: {pick.projected_away_score}</p>
+                                            <p className="text-xs text-zinc-400 mt-2 italic">
+                                              Lambda values represent expected goals calculated from team xG statistics and league averages
+                                            </p>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <p className="font-semibold text-green-400">Projected Score Calculation</p>
+                                            <p className="text-xs">Base: 1.5 goals/team (EPL average)</p>
+                                            <p className="text-xs">Home: 1.5 {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(2) || '0.00'} = {pick.projected_home_score}</p>
+                                            <p className="text-xs">Away: 1.5 {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(2) || '0.00'} = {pick.projected_away_score}</p>
+                                            <p className="text-xs text-zinc-400 mt-2 italic">Adjustments from all weighted factors (offense, defense, form, etc.)</p>
+                                          </>
+                                        )}
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
@@ -1113,9 +1369,15 @@ function App() {
                                         </div>
                                       </div>
                                     </div>
-                                    
-                                    {/* Calculation Summary Section */}
-                                    <div className="grid md:grid-cols-2 gap-4">
+
+                                    {/* Conditional Display: xG Poisson Model vs Regular Model */}
+                                    {pick.model_type === "xg_poisson" ? (
+                                      <PoissonModelDisplay pick={pick} />
+                                    ) : (
+                                      <>
+                                        {/* Regular Model Display */}
+                                        {/* Calculation Summary Section */}
+                                        <div className="grid md:grid-cols-2 gap-4">
                                       <div className="bg-gradient-to-br from-green-500/10 to-transparent border border-green-500/30 rounded-lg p-4">
                                         <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">Score Calculation</h5>
                                         <div className="space-y-2 text-xs text-zinc-300">
@@ -1229,13 +1491,8 @@ function App() {
                                       Positive contributions increase the projected score. The final score determines outcome probabilities, 
                                       which are compared to market odds to find value bets.
                                     </div>
-                                    
-                                    {/* Summary */}
-                                    <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
-                                      💡 <span className="font-semibold">How it works:</span> Each factor's contribution = (team rating - baseline) × factor weight × multiplier. 
-                                      Positive contributions increase the projected score. The final score determines outcome probabilities, 
-                                      which are compared to market odds to find value bets.
-                                    </div>
+                                      </>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -1992,6 +2249,164 @@ function App() {
                   Data Source: {teamDetails.data_source === 'api' ? 'Real API' : 'Mock Data'}
                 </Badge>
               </div>
+
+              {/* API Debugging Information */}
+              <Card className="bg-zinc-800/50 border-amber-500/30">
+                <CardHeader>
+                  <CardTitle className="text-lg text-amber-500 flex items-center gap-2">
+                    <Info className="w-5 h-5" />
+                    API Debugging Information
+                  </CardTitle>
+                  <CardDescription className="text-zinc-500">
+                    Technical details for debugging and validation
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* API Endpoint */}
+                  <div>
+                    <h5 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                      API Endpoint Used
+                    </h5>
+                    <div className="bg-zinc-900 border border-zinc-700 rounded p-3 font-mono text-xs text-green-400">
+                      GET {API}/teams/{encodeURIComponent(selectedTeamName)}
+                    </div>
+                  </div>
+
+                  {/* Response JSON */}
+                  <div>
+                    <h5 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                      API Response (JSON)
+                    </h5>
+                    <div className="bg-zinc-900 border border-zinc-700 rounded p-3 max-h-96 overflow-y-auto">
+                      <pre className="text-xs text-zinc-300 whitespace-pre-wrap font-mono">
+                        {JSON.stringify(teamDetails, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+
+                  {/* Data Points Used in Calculations */}
+                  <div>
+                    <h5 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                      Key Data Points Used in Model Calculations
+                    </h5>
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div className="bg-zinc-900/50 border border-zinc-700/50 rounded p-3">
+                        <p className="text-xs text-zinc-500 mb-2">Ratings (used by weighted models)</p>
+                        <div className="space-y-1 text-xs font-mono">
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Offense:</span>
+                            <span className="text-green-400">{teamDetails.ratings.offense}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Defense:</span>
+                            <span className="text-blue-400">{teamDetails.ratings.defense}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Form:</span>
+                            <span className="text-orange-400">{teamDetails.ratings.form}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-zinc-900/50 border border-zinc-700/50 rounded p-3">
+                        <p className="text-xs text-zinc-500 mb-2">Stats (used by all models)</p>
+                        <div className="space-y-1 text-xs font-mono">
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Avg Goals For:</span>
+                            <span className="text-green-400">{teamDetails.statistics.avg_goals_scored}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Avg Goals Against:</span>
+                            <span className="text-red-400">{teamDetails.statistics.avg_goals_conceded}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Win Rate:</span>
+                            <span className="text-blue-400">{teamDetails.statistics.win_rate}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* xG Statistics */}
+                      {teamDetails.xg_statistics && teamDetails.xg_statistics.matches_analyzed > 0 && (
+                        <>
+                          <div className="bg-purple-900/30 border border-purple-500/50 rounded p-3">
+                            <p className="text-xs text-purple-400 font-semibold mb-2">xG Stats (Poisson Model)</p>
+                            <div className="space-y-1 text-xs font-mono">
+                              <div className="flex justify-between">
+                                <span className="text-zinc-400">xG per match:</span>
+                                <span className="text-green-400">{teamDetails.xg_statistics.xG_per_match}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-zinc-400">xGA per match:</span>
+                                <span className="text-red-400">{teamDetails.xg_statistics.xGA_per_match}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-zinc-400">Attack Strength:</span>
+                                <span className="text-purple-400">{teamDetails.xg_statistics.attack_strength}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-purple-900/30 border border-purple-500/50 rounded p-3">
+                            <p className="text-xs text-purple-400 font-semibold mb-2">xG Home/Away Split</p>
+                            <div className="space-y-1 text-xs font-mono">
+                              <div className="flex justify-between">
+                                <span className="text-zinc-400">Home xG/match:</span>
+                                <span className="text-blue-400">{teamDetails.xg_statistics.home_xG_per_match}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-zinc-400">Away xG/match:</span>
+                                <span className="text-orange-400">{teamDetails.xg_statistics.away_xG_per_match}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-zinc-400">Defense Strength:</span>
+                                <span className="text-purple-400">{teamDetails.xg_statistics.defense_strength}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Data Flow Diagram */}
+                  <div>
+                    <h5 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
+                      Data Flow & Processing
+                    </h5>
+                    <div className="bg-zinc-900/50 border border-zinc-700/50 rounded p-4 space-y-3">
+                      {teamDetails.api_metadata && (
+                        <div className="text-xs text-zinc-400 space-y-1">
+                          <p><span className="text-amber-400 font-semibold">Source API:</span> {teamDetails.api_metadata.endpoint}</p>
+                          <p><span className="text-amber-400 font-semibold">Matches Analyzed:</span> {teamDetails.api_metadata.matches_analyzed}</p>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-xs text-zinc-400 mt-3">
+                        <div className="text-center">
+                          <div className="w-20 h-20 rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center mx-auto mb-2">
+                            <span className="text-green-400 font-semibold text-xs">API</span>
+                          </div>
+                          <p>Football-Data.org</p>
+                        </div>
+                        <ChevronRight className="w-6 h-6 text-zinc-600" />
+                        <div className="text-center">
+                          <div className="w-20 h-20 rounded-full bg-blue-500/20 border-2 border-blue-500 flex items-center justify-center mx-auto mb-2">
+                            <span className="text-blue-400 font-semibold text-xs">Backend</span>
+                          </div>
+                          <p>Calculate Stats</p>
+                        </div>
+                        <ChevronRight className="w-6 h-6 text-zinc-600" />
+                        <div className="text-center">
+                          <div className="w-20 h-20 rounded-full bg-purple-500/20 border-2 border-purple-500 flex items-center justify-center mx-auto mb-2">
+                            <span className="text-purple-400 font-semibold text-xs">Model</span>
+                          </div>
+                          <p>Generate Picks</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           ) : (
             <div className="text-center py-8 text-zinc-500">

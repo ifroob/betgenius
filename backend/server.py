@@ -1409,6 +1409,10 @@ async def get_team_details(team_name: str):
     
     logger.info(f"📤 Returning details for {team_name} with period-based stats")
     
+    # Get xG stats for this team if available
+    xg_stats = XG_TEAM_STATS.get(team_name, {})
+    team_strength = TEAM_STRENGTHS.get(team_name, {})
+    
     return {
         "name": team_name,
         "short_name": team_data.get("short", team_name[:3].upper()),
@@ -1432,7 +1436,25 @@ async def get_team_details(team_name: str):
         "period_stats": period_stats,
         "recent_matches": recent_matches[:10],
         "upcoming_fixtures": upcoming_fixtures[:3],
-        "data_source": "api"
+        "data_source": "api",
+        "api_metadata": {
+            "endpoint": f"{FOOTBALL_API_URL}/competitions/PL/matches",
+            "data_flow": [
+                "Football-Data.org API → Backend Processing → Statistical Calculation",
+                "Historical matches analyzed for xG and ratings",
+                "Team stats calculated from real match results"
+            ],
+            "matches_analyzed": len(all_team_matches)
+        },
+        "xg_statistics": {
+            "xG_per_match": round(xg_stats.get("xG_per_match", 0), 2),
+            "xGA_per_match": round(xg_stats.get("xGA_per_match", 0), 2),
+            "home_xG_per_match": round(xg_stats.get("home_xG_per_match", 0), 2),
+            "away_xG_per_match": round(xg_stats.get("away_xG_per_match", 0), 2),
+            "attack_strength": round(team_strength.get("attack_strength", 0), 3) if team_strength else 0,
+            "defense_strength": round(team_strength.get("defense_strength", 0), 3) if team_strength else 0,
+            "matches_analyzed": xg_stats.get("matches", 0)
+        }
     }
 
 @api_router.post("/refresh-data")
