@@ -169,10 +169,308 @@ class SimulationResult(BaseModel):
 API_GAMES = []
 API_TEAMS = {}
 HISTORICAL_GAMES = []
+XG_TEAM_STATS = {}  # xG statistics for each team
+LEAGUE_AVERAGES = {}  # League-wide xG averages
+TEAM_STRENGTHS = {}  # Normalized team strengths
 
 # ============ FOOTBALL-DATA.ORG API INTEGRATION ============
 FOOTBALL_API_KEY = os.environ.get('FOOTBALL_API_KEY', '')
 FOOTBALL_API_URL = "https://api.football-data.org/v4"
+
+# ============ XG POISSON MODEL IMPLEMENTATION ============
+import math
+
+def calculate_xg_stats_from_matches(matches):
+    """
+    Calculate xG and xGA for each team from actual match data.
+    For MVP: Using actual goals as proxy for xG (in production, would use real xG data)
+    
+    Returns:
+        dict: {team_name: {xG: float, xGA: float, matches: int, xG_per_match: float, xGA_per_match: float}}
+    """
+    team_xg_stats = {}
+    
+    for match in matches:
+        if match.get("is_completed") and match.get("home_score") is not None:
+            home_team = match["home"]
+            away_team = match["away"]
+            home_goals = match["home_score"]
+            away_goals = match["away_score"]
+            
+            # Initialize teams
+            if home_team not in team_xg_stats:
+                team_xg_stats[home_team] = {"xG": 0.0, "xGA": 0.0, "matches": 0, "home_matches": 0, "away_matches": 0, "home_xG": 0.0, "away_xG": 0.0, "home_xGA": 0.0, "away_xGA": 0.0}
+            if away_team not in team_xg_stats:
+                team_xg_stats[away_team] = {"xG": 0.0, "xGA": 0.0, "matches": 0, "home_matches": 0, "away_matches": 0, "home_xG": 0.0, "away_xG": 0.0, "home_xGA": 0.0, "away_xGA": 0.0}
+            
+            # Update xG and xGA (using actual goals as proxy)
+            team_xg_stats[home_team]["xG"] += home_goals
+            team_xg_stats[home_team]["xGA"] += away_goals
+            team_xg_stats[home_team]["matches"] += 1
+            team_xg_stats[home_team]["home_matches"] += 1
+            team_xg_stats[home_team]["home_xG"] += home_goals
+            team_xg_stats[home_team]["home_xGA"] += away_goals
+            
+            team_xg_stats[away_team]["xG"] += away_goals
+            team_xg_stats[away_team]["xGA"] += home_goals
+            team_xg_stats[away_team]["matches"] += 1
+            team_xg_stats[away_team]["away_matches"] += 1
+            team_xg_stats[away_team]["away_xG"] += away_goals
+            team_xg_stats[away_team]["away_xGA"] += home_goals
+    
+    # Calculate per-match rates
+    for team, stats in team_xg_stats.items():
+        if stats["matches"] > 0:
+            stats["xG_per_match"] = stats["xG"] / stats["matches"]
+            stats["xGA_per_match"] = stats["xGA"] / stats["matches"]
+            
+            # Home/Away splits
+            if stats["home_matches"] > 0:
+                stats["home_xG_per_match"] = stats["home_xG"] / stats["home_matches"]
+                stats["home_xGA_per_match"] = stats["home_xGA"] / stats["home_matches"]
+            else:
+                stats["home_xG_per_match"] = 1.5
+                stats["home_xGA_per_match"] = 1.5
+            
+            if stats["away_matches"] > 0:
+                stats["away_xG_per_match"] = stats["away_xG"] / stats["away_matches"]
+                stats["away_xGA_per_match"] = stats["away_xGA"] / stats["away_matches"]
+            else:
+                stats["away_xG_per_match"] = 1.2
+                stats["away_xGA_per_match"] = 1.2
+        else:
+            stats["xG_per_match"] = 1.35
+            stats["xGA_per_match"] = 1.35
+            stats["home_xG_per_match"] = 1.45
+            stats["home_xGA_per_match"] = 1.45
+            stats["away_xG_per_match"] = 1.15
+            stats["away_xGA_per_match"] = 1.15
+    
+    return team_xg_stats
+
+def calculate_league_averages(team_xg_stats):
+    """
+    Calculate league-wide average xG per match.
+    
+    Args:
+        team_xg_stats: Dictionary of team xG statistics
+    
+    Returns:
+        dict: {league_avg_xG: float, league_home_avg: float, league_away_avg: float}
+    """
+    if not team_xg_stats:
+        return {
+            "league_avg_xG": 1.50,
+            "league_home_avg": 1.45,
+            "league_away_avg": 1.15
+        }
+    
+    total_xG = sum(stats["xG"] for stats in team_xg_stats.values())
+    total_matches = sum(stats["matches"] for stats in team_xg_stats.values())
+    
+    total_home_xG = sum(stats.get("home_xG", 0) for stats in team_xg_stats.values())
+    total_home_matches = sum(stats.get("home_matches", 0) for stats in team_xg_stats.values())
+    
+    total_away_xG = sum(stats.get("away_xG", 0) for stats in team_xg_stats.values())
+    total_away_matches = sum(stats.get("away_matches", 0) for stats in team_xg_stats.values())
+    
+    league_avg_xG = total_xG / total_matches if total_matches > 0 else 1.50
+    league_home_avg = total_home_xG / total_home_matches if total_home_matches > 0 else 1.45
+    league_away_avg = total_away_xG / total_away_matches if total_away_matches > 0 else 1.15
+    
+    logger.info(f"📊 League Averages - Overall: {league_avg_xG:.2f}, Home: {league_home_avg:.2f}, Away: {league_away_avg:.2f}")
+    
+    return {
+        "league_avg_xG": league_avg_xG,
+        "league_home_avg": league_home_avg,
+        "league_away_avg": league_away_avg
+    }
+
+def calculate_team_strength(team_xg_stats, league_averages):
+    """
+    Normalize team strength relative to league averages.
+    
+    Args:
+        team_xg_stats: Dictionary of team xG statistics
+        league_averages: Dictionary of league average stats
+    
+    Returns:
+        dict: {team_name: {attack_strength: float, defense_strength: float}}
+    """
+    team_strengths = {}
+    league_avg = league_averages["league_avg_xG"]
+    
+    for team, stats in team_xg_stats.items():
+        attack_strength = stats["xG_per_match"] / league_avg if league_avg > 0 else 1.0
+        defense_strength = stats["xGA_per_match"] / league_avg if league_avg > 0 else 1.0
+        
+        team_strengths[team] = {
+            "attack_strength": attack_strength,
+            "defense_strength": defense_strength,
+            "attack_home": stats.get("home_xG_per_match", stats["xG_per_match"]) / league_averages["league_home_avg"],
+            "defense_home": stats.get("home_xGA_per_match", stats["xGA_per_match"]) / league_averages["league_home_avg"],
+            "attack_away": stats.get("away_xG_per_match", stats["xG_per_match"]) / league_averages["league_away_avg"],
+            "defense_away": stats.get("away_xGA_per_match", stats["xGA_per_match"]) / league_averages["league_away_avg"],
+        }
+    
+    return team_strengths
+
+def poisson_probability(k, lambda_val):
+    """
+    Calculate Poisson probability for k goals given lambda (expected goals).
+    P(k) = (e^(-λ) × λ^k) / k!
+    
+    Args:
+        k: Number of goals
+        lambda_val: Expected goals (λ)
+    
+    Returns:
+        float: Probability
+    """
+    if lambda_val <= 0:
+        return 1.0 if k == 0 else 0.0
+    
+    return (math.exp(-lambda_val) * (lambda_val ** k)) / math.factorial(k)
+
+def calculate_match_probabilities_poisson(lambda_home, lambda_away, max_goals=6):
+    """
+    Calculate match outcome probabilities using Poisson distribution.
+    
+    Args:
+        lambda_home: Expected goals for home team
+        lambda_away: Expected goals for away team
+        max_goals: Maximum goals to consider (default 6)
+    
+    Returns:
+        dict: {home_win: float, draw: float, away_win: float, score_probabilities: dict}
+    """
+    # Calculate probability for each score combination
+    score_probs = {}
+    home_win_prob = 0.0
+    draw_prob = 0.0
+    away_win_prob = 0.0
+    
+    for i in range(max_goals + 1):
+        p_home_i = poisson_probability(i, lambda_home)
+        
+        for j in range(max_goals + 1):
+            p_away_j = poisson_probability(j, lambda_away)
+            joint_prob = p_home_i * p_away_j
+            
+            score_probs[f"{i}-{j}"] = joint_prob
+            
+            if i > j:
+                home_win_prob += joint_prob
+            elif i == j:
+                draw_prob += joint_prob
+            else:
+                away_win_prob += joint_prob
+    
+    # Normalize to ensure probabilities sum to 1
+    total = home_win_prob + draw_prob + away_win_prob
+    if total > 0:
+        home_win_prob /= total
+        draw_prob /= total
+        away_win_prob /= total
+    
+    return {
+        "home": home_win_prob,
+        "draw": draw_prob,
+        "away": away_win_prob,
+        "score_probabilities": score_probs,
+        "lambda_home": lambda_home,
+        "lambda_away": lambda_away
+    }
+
+def generate_xg_poisson_pick(game, team_xg_stats, team_strengths, league_averages):
+    """
+    Generate a pick using xG Poisson model.
+    
+    Args:
+        game: Game dictionary
+        team_xg_stats: Team xG statistics
+        team_strengths: Team strength calculations
+        league_averages: League average stats
+    
+    Returns:
+        dict: Pick with xG Poisson calculations
+    """
+    home_team = game["home"]
+    away_team = game["away"]
+    
+    # Get team strengths
+    home_strength = team_strengths.get(home_team, {"attack_home": 1.0, "defense_home": 1.0})
+    away_strength = team_strengths.get(away_team, {"attack_away": 1.0, "defense_away": 1.0})
+    
+    # Calculate expected goals (λ) using home/away specific strengths
+    lambda_home = league_averages["league_home_avg"] * home_strength["attack_home"] * away_strength["defense_away"]
+    lambda_away = league_averages["league_away_avg"] * away_strength["attack_away"] * home_strength["defense_home"]
+    
+    # Get probabilities from Poisson distribution
+    probabilities = calculate_match_probabilities_poisson(lambda_home, lambda_away)
+    
+    # Determine best pick
+    best_outcome = max(probabilities.keys() - {"score_probabilities", "lambda_home", "lambda_away"}, 
+                      key=lambda k: probabilities[k])
+    
+    # Calculate market probabilities
+    market_probs = {
+        "home": 1 / game.get("h_odds", 2.0),
+        "draw": 1 / game.get("d_odds", 3.0),
+        "away": 1 / game.get("a_odds", 3.0)
+    }
+    
+    edge = (probabilities[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+    
+    # Get xG stats for breakdown
+    home_xg_stats = team_xg_stats.get(home_team, {})
+    away_xg_stats = team_xg_stats.get(away_team, {})
+    
+    return {
+        "predicted_outcome": best_outcome,
+        "lambda_home": round(lambda_home, 2),
+        "lambda_away": round(lambda_away, 2),
+        "probabilities": {
+            "home": round(probabilities["home"] * 100, 1),
+            "draw": round(probabilities["draw"] * 100, 1),
+            "away": round(probabilities["away"] * 100, 1)
+        },
+        "edge_percentage": round(edge, 1),
+        "model_probability": round(probabilities[best_outcome] * 100, 1),
+        "market_probability": round(market_probs[best_outcome] * 100, 1),
+        "xg_breakdown": {
+            "home_team": {
+                "xG_per_match": round(home_xg_stats.get("xG_per_match", 0), 2),
+                "xGA_per_match": round(home_xg_stats.get("xGA_per_match", 0), 2),
+                "attack_strength": round(home_strength["attack_home"], 2),
+                "defense_strength": round(home_strength["defense_home"], 2),
+                "matches": home_xg_stats.get("matches", 0)
+            },
+            "away_team": {
+                "xG_per_match": round(away_xg_stats.get("xG_per_match", 0), 2),
+                "xGA_per_match": round(away_xg_stats.get("xGA_per_match", 0), 2),
+                "attack_strength": round(away_strength["attack_away"], 2),
+                "defense_strength": round(away_strength["defense_away"], 2),
+                "matches": away_xg_stats.get("matches", 0)
+            },
+            "league_averages": {
+                "overall": round(league_averages["league_avg_xG"], 2),
+                "home": round(league_averages["league_home_avg"], 2),
+                "away": round(league_averages["league_away_avg"], 2)
+            },
+            "calculation_steps": {
+                "step_1": f"Home team attack strength: {home_xg_stats.get('home_xG_per_match', 0):.2f} / {league_averages['league_home_avg']:.2f} = {home_strength['attack_home']:.2f}",
+                "step_2": f"Away team defense strength: {away_xg_stats.get('away_xGA_per_match', 0):.2f} / {league_averages['league_away_avg']:.2f} = {away_strength['defense_away']:.2f}",
+                "step_3": f"λ_home = {league_averages['league_home_avg']:.2f} × {home_strength['attack_home']:.2f} × {away_strength['defense_away']:.2f} = {lambda_home:.2f}",
+                "step_4": f"Away team attack strength: {away_xg_stats.get('away_xG_per_match', 0):.2f} / {league_averages['league_away_avg']:.2f} = {away_strength['attack_away']:.2f}",
+                "step_5": f"Home team defense strength: {home_xg_stats.get('home_xGA_per_match', 0):.2f} / {league_averages['league_home_avg']:.2f} = {home_strength['defense_home']:.2f}",
+                "step_6": f"λ_away = {league_averages['league_away_avg']:.2f} × {away_strength['attack_away']:.2f} × {home_strength['defense_home']:.2f} = {lambda_away:.2f}",
+                "step_7": "Poisson probabilities calculated from λ values",
+                "step_8": f"Best outcome: {best_outcome.upper()} with {probabilities[best_outcome]*100:.1f}% probability"
+            }
+        },
+        "score_probabilities": probabilities.get("score_probabilities", {})
+    }
 
 def calculate_period_stats(team_matches, period=None):
     """
@@ -524,6 +822,14 @@ async def fetch_epl_fixtures_from_api():
             API_TEAMS = calculate_team_stats_from_matches(finished_matches)
             logger.info(f"✅ Calculated stats for {len(API_TEAMS)} teams from real match data")
             
+            # Calculate xG statistics for Poisson model
+            global XG_TEAM_STATS, LEAGUE_AVERAGES, TEAM_STRENGTHS
+            XG_TEAM_STATS = calculate_xg_stats_from_matches(finished_matches)
+            LEAGUE_AVERAGES = calculate_league_averages(XG_TEAM_STATS)
+            TEAM_STRENGTHS = calculate_team_strength(XG_TEAM_STATS, LEAGUE_AVERAGES)
+            logger.info(f"✅ Calculated xG stats for {len(XG_TEAM_STATS)} teams")
+            logger.info(f"   League avg xG: {LEAGUE_AVERAGES.get('league_avg_xG', 0):.2f} goals/match")
+            
             # Generate odds for upcoming matches based on real stats
             for game in upcoming_matches:
                 home_team = game["home"]
@@ -601,6 +907,15 @@ PRESET_MODELS = [
             "win_rate": 10,
             # Period settings - longer periods for statistical depth
             "form_period": 15, "goals_period": 15, "win_rate_period": 15
+        },
+    },
+    {
+        "id": "preset-xg-poisson",
+        "name": "xG Poisson Model",
+        "description": "Advanced model using expected goals (xG) and Poisson distribution for outcome probabilities",
+        "model_type": "preset",
+        "weights": {
+            "use_xg_model": True  # Special flag to use xG Poisson calculations
         },
     },
 ]
@@ -1272,82 +1587,181 @@ async def generate_picks(model_id: str):
     weights = model["weights"]
     picks = []
     
-    for i, g in enumerate(API_GAMES):
-        home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
-        away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
+    # Check if this is the xG Poisson model
+    is_xg_model = weights.get("use_xg_model", False)
+    
+    if is_xg_model:
+        logger.info("📊 Using xG Poisson model for predictions")
         
-        probs = calculate_outcome_probabilities(home_score, away_score)
-        
-        market_probs = {
-            "home": 1 / g.get("h_odds", 2.0),
-            "draw": 1 / g.get("d_odds", 3.0),
-            "away": 1 / g.get("a_odds", 3.0)
-        }
-        
-        # Pick the outcome with highest model probability (aligns with projected scores)
-        best_outcome = max(probs.keys(), key=lambda k: probs[k])
-        edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
-        
-        market_odds = {
-            "home": g.get("h_odds", 2.0),
-            "draw": g.get("d_odds", 3.0),
-            "away": g.get("a_odds", 3.0)
-        }[best_outcome]
-        
-        # Use improved confidence calculation
-        confidence, confidence_explanation = calculate_confidence(
-            probs[best_outcome], 
-            market_probs[best_outcome],
-            home_score,
-            away_score
-        )
-        
-        # Calculate how the projected scores were determined
-        calculation_summary = {
-            "base_score": 1.5,
-            "home_adjustments": sum(v["contribution"] for v in home_breakdown.values()),
-            "away_adjustments": sum(v["contribution"] for v in away_breakdown.values()),
-            "home_final": home_score,
-            "away_final": away_score,
-            "formula": f"Base Score (1.5) + Weighted Factor Contributions = Final Score"
-        }
-        
-        pick = {
-            "id": f"pick-{model_id}-{g['id']}",
-            "game_id": g.get("id"),
-            "model_id": model_id,
-            "model_name": model["name"],
-            "home_team": g["home"],
-            "away_team": g["away"],
-            "match_date": g["date"],
-            "predicted_outcome": best_outcome,
-            "projected_home_score": home_score,
-            "projected_away_score": away_score,
-            "market_odds": market_odds,
-            "confidence_score": confidence,
-            "confidence_explanation": confidence_explanation,
-            "edge_percentage": round(edge, 1),
-            "model_probability": round(probs[best_outcome] * 100, 1),
-            "market_probability": round(market_probs[best_outcome] * 100, 1),
-            "all_probabilities": {
-                "home": round(probs["home"] * 100, 1),
-                "draw": round(probs["draw"] * 100, 1),
-                "away": round(probs["away"] * 100, 1)
-            },
-            "all_market_odds": {
+        # Generate picks using xG Poisson model
+        for g in API_GAMES:
+            xg_pick = generate_xg_poisson_pick(g, XG_TEAM_STATS, TEAM_STRENGTHS, LEAGUE_AVERAGES)
+            
+            best_outcome = xg_pick["predicted_outcome"]
+            market_odds = {
                 "home": g.get("h_odds", 2.0),
                 "draw": g.get("d_odds", 3.0),
                 "away": g.get("a_odds", 3.0)
-            },
-            "home_breakdown": home_breakdown,
-            "away_breakdown": away_breakdown,
-            "calculation_summary": calculation_summary,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "data_source": "api"
-        }
-        picks.append(pick)
+            }[best_outcome]
+            
+            # Calculate confidence based on edge and lambda values
+            lambda_diff = abs(xg_pick["lambda_home"] - xg_pick["lambda_away"])
+            edge = xg_pick["edge_percentage"]
+            
+            # Confidence scoring for xG model
+            if edge >= 20:
+                confidence = 10
+            elif edge >= 15:
+                confidence = 9
+            elif edge >= 10:
+                confidence = 8
+            elif edge >= 5:
+                confidence = 7
+            elif edge >= 0:
+                confidence = 6
+            elif edge >= -5:
+                confidence = 5
+            elif edge >= -10:
+                confidence = 4
+            elif edge >= -15:
+                confidence = 3
+            else:
+                confidence = 2
+            
+            # Adjust for lambda clarity
+            if lambda_diff >= 1.0:
+                confidence = min(10, confidence + 1)
+            elif lambda_diff < 0.3:
+                confidence = max(1, confidence - 1)
+            
+            confidence_explanation = {
+                "strength": "Very Strong" if confidence >= 8 else "Strong" if confidence >= 6 else "Moderate" if confidence >= 4 else "Weak",
+                "reasoning": f"xG Poisson model predicts {best_outcome.upper()} with {xg_pick['model_probability']}% probability (edge: {edge:+.1f}%). Expected goals: {xg_pick['lambda_home']:.2f} - {xg_pick['lambda_away']:.2f}",
+                "edge": edge,
+                "model_probability": xg_pick["model_probability"],
+                "market_probability": xg_pick["market_probability"],
+                "lambda_home": xg_pick["lambda_home"],
+                "lambda_away": xg_pick["lambda_away"]
+            }
+            
+            pick = {
+                "id": f"pick-{model_id}-{g['id']}",
+                "game_id": g.get("id"),
+                "model_id": model_id,
+                "model_name": model["name"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "predicted_outcome": best_outcome,
+                "projected_home_score": xg_pick["lambda_home"],
+                "projected_away_score": xg_pick["lambda_away"],
+                "market_odds": market_odds,
+                "confidence_score": confidence,
+                "confidence_explanation": confidence_explanation,
+                "edge_percentage": edge,
+                "model_probability": xg_pick["model_probability"],
+                "market_probability": xg_pick["market_probability"],
+                "all_probabilities": xg_pick["probabilities"],
+                "all_market_odds": {
+                    "home": g.get("h_odds", 2.0),
+                    "draw": g.get("d_odds", 3.0),
+                    "away": g.get("a_odds", 3.0)
+                },
+                "xg_breakdown": xg_pick["xg_breakdown"],
+                "calculation_summary": {
+                    "model_type": "xG Poisson",
+                    "formula": "λ = league_avg × attack_strength × opponent_defense_strength, then Poisson distribution",
+                    "lambda_home": xg_pick["lambda_home"],
+                    "lambda_away": xg_pick["lambda_away"]
+                },
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "data_source": "api",
+                "model_type": "xg_poisson"
+            }
+            picks.append(pick)
+            
+            logger.info(f"  ✅ xG Pick: {g['home']} vs {g['away']} → {best_outcome.upper()} (λ: {xg_pick['lambda_home']:.2f}-{xg_pick['lambda_away']:.2f}, conf: {confidence}/10)")
+    
+    else:
+        # Use traditional weighted factor model
+        logger.info("📊 Using traditional weighted factor model")
         
-        logger.info(f"  ✅ Pick: {g['home']} vs {g['away']} → {best_outcome.upper()} (conf: {confidence}/10)")
+        for i, g in enumerate(API_GAMES):
+            home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
+            away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
+            
+            probs = calculate_outcome_probabilities(home_score, away_score)
+            
+            market_probs = {
+                "home": 1 / g.get("h_odds", 2.0),
+                "draw": 1 / g.get("d_odds", 3.0),
+                "away": 1 / g.get("a_odds", 3.0)
+            }
+            
+            # Pick the outcome with highest model probability (aligns with projected scores)
+            best_outcome = max(probs.keys(), key=lambda k: probs[k])
+            edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+            
+            market_odds = {
+                "home": g.get("h_odds", 2.0),
+                "draw": g.get("d_odds", 3.0),
+                "away": g.get("a_odds", 3.0)
+            }[best_outcome]
+            
+            # Use improved confidence calculation
+            confidence, confidence_explanation = calculate_confidence(
+                probs[best_outcome], 
+                market_probs[best_outcome],
+                home_score,
+                away_score
+            )
+            
+            # Calculate how the projected scores were determined
+            calculation_summary = {
+                "base_score": 1.5,
+                "home_adjustments": sum(v["contribution"] for v in home_breakdown.values()),
+                "away_adjustments": sum(v["contribution"] for v in away_breakdown.values()),
+                "home_final": home_score,
+                "away_final": away_score,
+                "formula": f"Base Score (1.5) + Weighted Factor Contributions = Final Score"
+            }
+            
+            pick = {
+                "id": f"pick-{model_id}-{g['id']}",
+                "game_id": g.get("id"),
+                "model_id": model_id,
+                "model_name": model["name"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "predicted_outcome": best_outcome,
+                "projected_home_score": home_score,
+                "projected_away_score": away_score,
+                "market_odds": market_odds,
+                "confidence_score": confidence,
+                "confidence_explanation": confidence_explanation,
+                "edge_percentage": round(edge, 1),
+                "model_probability": round(probs[best_outcome] * 100, 1),
+                "market_probability": round(market_probs[best_outcome] * 100, 1),
+                "all_probabilities": {
+                    "home": round(probs["home"] * 100, 1),
+                    "draw": round(probs["draw"] * 100, 1),
+                    "away": round(probs["away"] * 100, 1)
+                },
+                "all_market_odds": {
+                    "home": g.get("h_odds", 2.0),
+                    "draw": g.get("d_odds", 3.0),
+                    "away": g.get("a_odds", 3.0)
+                },
+                "home_breakdown": home_breakdown,
+                "away_breakdown": away_breakdown,
+                "calculation_summary": calculation_summary,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "data_source": "api"
+            }
+            picks.append(pick)
+            
+            logger.info(f"  ✅ Pick: {g['home']} vs {g['away']} → {best_outcome.upper()} (conf: {confidence}/10)")
     
     picks.sort(key=lambda x: x["confidence_score"], reverse=True)
     logger.info(f"📤 Generated {len(picks)} picks")
