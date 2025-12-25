@@ -239,7 +239,11 @@ function App() {
     travel_distance: 8,
     referee_influence: 8,
     weather_conditions: 5,
-    motivation_level: 5
+    motivation_level: 5,
+    // Period settings for time-based factors
+    form_period: 10,
+    goals_period: 10,
+    win_rate_period: 10
   });
   
   // Expanded pick reasoning state
@@ -356,7 +360,8 @@ function App() {
       setWeights({ 
         team_offense: 12, team_defense: 12, recent_form: 12, injuries: 10, home_advantage: 10,
         head_to_head: 10, rest_days: 8, travel_distance: 8, referee_influence: 8,
-        weather_conditions: 5, motivation_level: 5
+        weather_conditions: 5, motivation_level: 5,
+        form_period: 10, goals_period: 10, win_rate_period: 10
       });
       fetchData();
     } catch (err) {
@@ -779,6 +784,77 @@ function App() {
                       value={weights.motivation_level}
                       onChange={(v) => setWeights(w => ({ ...w, motivation_level: v }))}
                     />
+                    
+                    <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mt-6 mb-2 flex items-center gap-2">
+                      <div className="h-px flex-1 bg-orange-500/30"></div>
+                      Period Customization
+                      <div className="h-px flex-1 bg-orange-500/30"></div>
+                    </div>
+                    <div className="space-y-4 p-4 bg-zinc-800/30 rounded border border-zinc-700/30">
+                      <p className="text-xs text-zinc-400 mb-3">
+                        Customize how many recent matches to analyze for time-sensitive factors
+                      </p>
+                      
+                      <div className="space-y-2">
+                        <label className="text-sm text-zinc-300 flex items-center gap-2">
+                          <span>Recent Form Period</span>
+                          <span className="text-xs text-zinc-500">(Last N matches)</span>
+                        </label>
+                        <Select 
+                          value={weights.form_period.toString()} 
+                          onValueChange={(v) => setWeights(w => ({ ...w, form_period: parseInt(v) }))}
+                        >
+                          <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="form-period-select">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-zinc-800 border-zinc-700">
+                            <SelectItem value="5">Last 5 matches</SelectItem>
+                            <SelectItem value="10">Last 10 matches</SelectItem>
+                            <SelectItem value="15">Last 15 matches</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <label className="text-sm text-zinc-300 flex items-center gap-2">
+                          <span>Goals Analysis Period</span>
+                          <span className="text-xs text-zinc-500">(Goals For/Against)</span>
+                        </label>
+                        <Select 
+                          value={weights.goals_period.toString()} 
+                          onValueChange={(v) => setWeights(w => ({ ...w, goals_period: parseInt(v) }))}
+                        >
+                          <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="goals-period-select">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-zinc-800 border-zinc-700">
+                            <SelectItem value="5">Last 5 matches</SelectItem>
+                            <SelectItem value="10">Last 10 matches</SelectItem>
+                            <SelectItem value="15">Last 15 matches</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <label className="text-sm text-zinc-300 flex items-center gap-2">
+                          <span>Win Rate Period</span>
+                          <span className="text-xs text-zinc-500">(Historical success)</span>
+                        </label>
+                        <Select 
+                          value={weights.win_rate_period.toString()} 
+                          onValueChange={(v) => setWeights(w => ({ ...w, win_rate_period: parseInt(v) }))}
+                        >
+                          <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="win-rate-period-select">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-zinc-800 border-zinc-700">
+                            <SelectItem value="5">Last 5 matches</SelectItem>
+                            <SelectItem value="10">Last 10 matches</SelectItem>
+                            <SelectItem value="15">Last 15 matches</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-sm border border-zinc-700/50">
@@ -1711,6 +1787,135 @@ function App() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Period-Based Statistics */}
+              {teamDetails.period_stats && (
+                <Card className="bg-zinc-800/50 border-zinc-700">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-green-500 flex items-center gap-2">
+                      <BarChart2 className="w-5 h-5" />
+                      Performance by Time Period
+                    </CardTitle>
+                    <CardDescription className="text-zinc-500">
+                      Stats calculated from different match ranges
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid md:grid-cols-3 gap-4">
+                      {/* Last 5 Matches */}
+                      {teamDetails.period_stats.last_5 && (
+                        <div className="p-4 bg-gradient-to-br from-green-500/10 to-transparent border border-green-500/30 rounded-lg">
+                          <h4 className="text-sm font-semibold text-green-400 uppercase mb-3 flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Last 5 Matches
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Matches:</span>
+                              <span className="font-mono text-zinc-200">{teamDetails.period_stats.last_5.matches}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Win Rate:</span>
+                              <span className="font-mono font-bold text-green-400">{teamDetails.period_stats.last_5.win_rate}%</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Goals For:</span>
+                              <span className="font-mono text-blue-400">{teamDetails.period_stats.last_5.avg_goals_for}/match</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Goals Against:</span>
+                              <span className="font-mono text-red-400">{teamDetails.period_stats.last_5.avg_goals_against}/match</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-zinc-700">
+                              <span className="text-zinc-400">Goal Diff:</span>
+                              <span className={`font-mono font-bold ${teamDetails.period_stats.last_5.goal_difference >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {teamDetails.period_stats.last_5.goal_difference > 0 ? '+' : ''}{teamDetails.period_stats.last_5.goal_difference.toFixed(1)}
+                              </span>
+                            </div>
+                            <div className="text-xs text-zinc-500 italic mt-2">
+                              W:{teamDetails.period_stats.last_5.wins} D:{teamDetails.period_stats.last_5.draws} L:{teamDetails.period_stats.last_5.losses}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Last 10 Matches */}
+                      {teamDetails.period_stats.last_10 && (
+                        <div className="p-4 bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/30 rounded-lg">
+                          <h4 className="text-sm font-semibold text-blue-400 uppercase mb-3 flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Last 10 Matches
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Matches:</span>
+                              <span className="font-mono text-zinc-200">{teamDetails.period_stats.last_10.matches}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Win Rate:</span>
+                              <span className="font-mono font-bold text-green-400">{teamDetails.period_stats.last_10.win_rate}%</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Goals For:</span>
+                              <span className="font-mono text-blue-400">{teamDetails.period_stats.last_10.avg_goals_for}/match</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Goals Against:</span>
+                              <span className="font-mono text-red-400">{teamDetails.period_stats.last_10.avg_goals_against}/match</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-zinc-700">
+                              <span className="text-zinc-400">Goal Diff:</span>
+                              <span className={`font-mono font-bold ${teamDetails.period_stats.last_10.goal_difference >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {teamDetails.period_stats.last_10.goal_difference > 0 ? '+' : ''}{teamDetails.period_stats.last_10.goal_difference.toFixed(1)}
+                              </span>
+                            </div>
+                            <div className="text-xs text-zinc-500 italic mt-2">
+                              W:{teamDetails.period_stats.last_10.wins} D:{teamDetails.period_stats.last_10.draws} L:{teamDetails.period_stats.last_10.losses}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Last 15 Matches */}
+                      {teamDetails.period_stats.last_15 && (
+                        <div className="p-4 bg-gradient-to-br from-orange-500/10 to-transparent border border-orange-500/30 rounded-lg">
+                          <h4 className="text-sm font-semibold text-orange-400 uppercase mb-3 flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Last 15 Matches
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Matches:</span>
+                              <span className="font-mono text-zinc-200">{teamDetails.period_stats.last_15.matches}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Win Rate:</span>
+                              <span className="font-mono font-bold text-green-400">{teamDetails.period_stats.last_15.win_rate}%</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Goals For:</span>
+                              <span className="font-mono text-blue-400">{teamDetails.period_stats.last_15.avg_goals_for}/match</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-zinc-400">Goals Against:</span>
+                              <span className="font-mono text-red-400">{teamDetails.period_stats.last_15.avg_goals_against}/match</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-zinc-700">
+                              <span className="text-zinc-400">Goal Diff:</span>
+                              <span className={`font-mono font-bold ${teamDetails.period_stats.last_15.goal_difference >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {teamDetails.period_stats.last_15.goal_difference > 0 ? '+' : ''}{teamDetails.period_stats.last_15.goal_difference.toFixed(1)}
+                              </span>
+                            </div>
+                            <div className="text-xs text-zinc-500 italic mt-2">
+                              W:{teamDetails.period_stats.last_15.wins} D:{teamDetails.period_stats.last_15.draws} L:{teamDetails.period_stats.last_15.losses}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Recent Matches */}
               {teamDetails.recent_matches && teamDetails.recent_matches.length > 0 && (

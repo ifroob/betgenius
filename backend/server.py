@@ -174,6 +174,107 @@ HISTORICAL_GAMES = []
 FOOTBALL_API_KEY = os.environ.get('FOOTBALL_API_KEY', '')
 FOOTBALL_API_URL = "https://api.football-data.org/v4"
 
+def calculate_period_stats(team_matches, period=None):
+    """
+    Calculate stats for a specific period (last N matches)
+    Args:
+        team_matches: List of matches for a team (most recent last)
+        period: Number of matches to consider (None = all matches)
+    Returns:
+        Dictionary with goals_for, goals_against, wins, draws, losses, matches
+    """
+    if period:
+        team_matches = team_matches[-period:]  # Get last N matches
+    
+    stats = {
+        "goals_for": 0,
+        "goals_against": 0,
+        "wins": 0,
+        "draws": 0,
+        "losses": 0,
+        "matches": len(team_matches)
+    }
+    
+    for match in team_matches:
+        stats["goals_for"] += match["goals_scored"]
+        stats["goals_against"] += match["goals_conceded"]
+        
+        if match["result"] == "win":
+            stats["wins"] += 1
+        elif match["result"] == "draw":
+            stats["draws"] += 1
+        else:
+            stats["losses"] += 1
+    
+    # Calculate averages and percentages
+    if stats["matches"] > 0:
+        stats["avg_goals_for"] = round(stats["goals_for"] / stats["matches"], 2)
+        stats["avg_goals_against"] = round(stats["goals_against"] / stats["matches"], 2)
+        stats["win_rate"] = round((stats["wins"] / stats["matches"]) * 100, 1)
+        stats["goal_difference"] = stats["goals_for"] - stats["goals_against"]
+    else:
+        stats["avg_goals_for"] = 0
+        stats["avg_goals_against"] = 0
+        stats["win_rate"] = 0
+        stats["goal_difference"] = 0
+    
+    return stats
+
+def get_team_match_history(team_name, matches):
+    """
+    Extract all matches for a specific team from match list
+    Returns list of matches with normalized data (most recent last)
+    """
+    team_matches = []
+    
+    for match in matches:
+        if not match.get("is_completed") or match.get("home_score") is None:
+            continue
+            
+        home_team = match["home"]
+        away_team = match["away"]
+        home_score = match["home_score"]
+        away_score = match["away_score"]
+        
+        if home_team == team_name:
+            # Team played at home
+            if home_score > away_score:
+                result = "win"
+            elif home_score < away_score:
+                result = "loss"
+            else:
+                result = "draw"
+            
+            team_matches.append({
+                "date": match.get("date"),
+                "opponent": away_team,
+                "home_away": "home",
+                "goals_scored": home_score,
+                "goals_conceded": away_score,
+                "result": result,
+                "match_data": match
+            })
+        elif away_team == team_name:
+            # Team played away
+            if away_score > home_score:
+                result = "win"
+            elif away_score < home_score:
+                result = "loss"
+            else:
+                result = "draw"
+            
+            team_matches.append({
+                "date": match.get("date"),
+                "opponent": home_team,
+                "home_away": "away",
+                "goals_scored": away_score,
+                "goals_conceded": home_score,
+                "result": result,
+                "match_data": match
+            })
+    
+    return team_matches
+
 def calculate_team_stats_from_matches(matches):
     """Calculate team statistics from actual match history - NO RANDOM DATA"""
     logger.info(f"📊 Calculating team stats from {len(matches)} completed matches")
@@ -471,7 +572,9 @@ PRESET_MODELS = [
         "weights": {
             "team_offense": 15, "team_defense": 15, "recent_form": 15, 
             "home_advantage": 15, "head_to_head": 10, "goals_differential": 15,
-            "win_rate": 15
+            "win_rate": 15,
+            # Period settings
+            "form_period": 10, "goals_period": 10, "win_rate_period": 10
         },
     },
     {
@@ -482,7 +585,9 @@ PRESET_MODELS = [
         "weights": {
             "team_offense": 10, "team_defense": 10, "recent_form": 30, 
             "home_advantage": 15, "head_to_head": 10, "goals_differential": 10,
-            "win_rate": 15
+            "win_rate": 15,
+            # Period settings - shorter periods for form-focused
+            "form_period": 5, "goals_period": 5, "win_rate_period": 5
         },
     },
     {
@@ -493,14 +598,66 @@ PRESET_MODELS = [
         "weights": {
             "team_offense": 25, "team_defense": 25, "recent_form": 10, 
             "home_advantage": 10, "head_to_head": 5, "goals_differential": 15,
-            "win_rate": 10
+            "win_rate": 10,
+            # Period settings - longer periods for statistical depth
+            "form_period": 15, "goals_period": 15, "win_rate_period": 15
         },
     },
 ]
 
 # ============ HELPER FUNCTIONS ============
+def get_period_based_stats(team_name: str, periods: dict) -> dict:
+    """
+    Get period-based statistics for a team
+    Args:
+        team_name: Name of the team
+        periods: Dict with form_period, goals_period, win_rate_period
+    Returns:
+        Dict with period-specific stats
+    """
+    team_matches = get_team_match_history(team_name, HISTORICAL_GAMES)
+    
+    if not team_matches:
+        return {
+            "form_stats": {"win_rate": 50, "matches": 0},
+            "goals_stats": {"avg_goals_for": 1.5, "avg_goals_against": 1.5, "matches": 0},
+            "win_rate_stats": {"win_rate": 50, "matches": 0}
+        }
+    
+    # Get form period stats
+    form_period = periods.get("form_period", 10)
+    form_stats = calculate_period_stats(team_matches, form_period)
+    
+    # Get goals period stats
+    goals_period = periods.get("goals_period", 10)
+    goals_stats = calculate_period_stats(team_matches, goals_period)
+    
+    # Get win rate period stats
+    win_rate_period = periods.get("win_rate_period", 10)
+    win_rate_stats = calculate_period_stats(team_matches, win_rate_period)
+    
+    return {
+        "form_stats": {
+            "win_rate": form_stats["win_rate"],
+            "matches": form_stats["matches"],
+            "period": form_period
+        },
+        "goals_stats": {
+            "avg_goals_for": goals_stats["avg_goals_for"],
+            "avg_goals_against": goals_stats["avg_goals_against"],
+            "goal_difference": goals_stats["goal_difference"],
+            "matches": goals_stats["matches"],
+            "period": goals_period
+        },
+        "win_rate_stats": {
+            "win_rate": win_rate_stats["win_rate"],
+            "matches": win_rate_stats["matches"],
+            "period": win_rate_period
+        }
+    }
+
 def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data: dict = None) -> tuple:
-    """Calculate projected score based on REAL team data with ALL 11 factors"""
+    """Calculate projected score based on REAL team data with period-based customization"""
     team = API_TEAMS.get(team_name)
     if not team:
         logger.warning(f"⚠️ Team {team_name} not found in API_TEAMS")
@@ -509,51 +666,63 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     if game_data is None:
         game_data = {}
     
-    # Normalize weights
-    total_weight = sum(weights.values())
+    # Get period-based stats
+    periods = {
+        "form_period": weights.get("form_period", 10),
+        "goals_period": weights.get("goals_period", 10),
+        "win_rate_period": weights.get("win_rate_period", 10)
+    }
+    period_stats = get_period_based_stats(team_name, periods)
+    
+    # Normalize weights (exclude period settings from weight calculation)
+    weight_keys = [k for k in weights.keys() if not k.endswith('_period')]
+    total_weight = sum(weights.get(k, 0) for k in weight_keys)
     if total_weight == 0:
         return 1.5, {}
     
-    norm_weights = {k: v / total_weight for k, v in weights.items()}
+    norm_weights = {k: weights.get(k, 0) / total_weight for k in weight_keys}
     
     # Base score starts at 1.5 (average EPL goals per team per match)
     BASE_SCORE = 1.5
     breakdown = {}
     total_contribution = 0
     
-    # 1. OFFENSE - Primary attacking factor
-    offense_value = team.get("offense", 70) / 100
+    # 1. OFFENSE - Primary attacking factor (using goals period)
+    goals_for = period_stats["goals_stats"]["avg_goals_for"]
+    offense_value = min(0.95, max(0.50, 0.50 + (goals_for / 3.0 * 0.45)))
     offense_contrib = (offense_value - 0.5) * norm_weights.get("team_offense", 0) * 2.0
     breakdown["team_offense"] = {
-        "raw_value": team.get("offense", 70),
+        "raw_value": round(offense_value * 100, 1),
         "normalized": offense_value,
         "weight": norm_weights.get("team_offense", 0) * 100,
         "contribution": offense_contrib,
-        "description": f"Offensive rating {team.get('offense', 70)}/100 from actual goals scored. Higher offense = more goals."
+        "description": f"Offensive rating from last {period_stats['goals_stats']['period']} matches: {goals_for:.2f} goals/match. Higher offense = more goals."
     }
     total_contribution += offense_contrib
     
-    # 2. DEFENSE - Affects opponent's scoring but also team confidence
-    defense_value = team.get("defense", 70) / 100
+    # 2. DEFENSE - Affects opponent's scoring but also team confidence (using goals period)
+    goals_against = period_stats["goals_stats"]["avg_goals_against"]
+    defense_value = min(0.95, max(0.50, 0.95 - (goals_against / 3.0 * 0.45)))
     defense_contrib = (defense_value - 0.5) * norm_weights.get("team_defense", 0) * 0.8
     breakdown["team_defense"] = {
-        "raw_value": team.get("defense", 70),
+        "raw_value": round(defense_value * 100, 1),
         "normalized": defense_value,
         "weight": norm_weights.get("team_defense", 0) * 100,
         "contribution": defense_contrib,
-        "description": f"Defensive rating {team.get('defense', 70)}/100 from actual goals conceded. Strong defense improves team confidence."
+        "description": f"Defensive rating from last {period_stats['goals_stats']['period']} matches: {goals_against:.2f} goals conceded/match. Strong defense improves team confidence."
     }
     total_contribution += defense_contrib
     
-    # 3. RECENT FORM - Current momentum and confidence
-    form_value = team.get("form", 70) / 100
+    # 3. RECENT FORM - Current momentum and confidence (using form period)
+    form_win_rate = period_stats["form_stats"]["win_rate"]
+    form_value = min(0.95, max(0.40, 0.40 + (form_win_rate / 100 * 0.55)))
     form_contrib = (form_value - 0.5) * norm_weights.get("recent_form", 0) * 1.5
     breakdown["recent_form"] = {
-        "raw_value": team.get("form", 70),
+        "raw_value": round(form_value * 100, 1),
         "normalized": form_value,
         "weight": norm_weights.get("recent_form", 0) * 100,
         "contribution": form_contrib,
-        "description": f"Form rating {team.get('form', 70)}/100 from recent win percentage. Good form = better performance."
+        "description": f"Form rating from last {period_stats['form_stats']['period']} matches: {form_win_rate:.1f}% win rate. Good form = better performance."
     }
     total_contribution += form_contrib
     
@@ -682,28 +851,28 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     }
     total_contribution += motivation_contrib
     
-    # 12. GOALS DIFFERENTIAL - Overall team quality indicator
-    goals_diff = team.get("goals_for", 0) - team.get("goals_against", 0)
-    goals_diff_normalized = min(max(goals_diff / 30, -1), 1)  # Normalize to -1 to 1
+    # 12. GOALS DIFFERENTIAL - Overall team quality indicator (using goals period)
+    goals_diff = period_stats["goals_stats"]["goal_difference"]
+    goals_diff_normalized = min(max(goals_diff / 15, -1), 1)  # Normalize to -1 to 1
     goals_diff_contrib = goals_diff_normalized * norm_weights.get("goals_differential", 0) * 0.6
     breakdown["goals_differential"] = {
         "raw_value": goals_diff,
         "normalized": goals_diff_normalized,
         "weight": norm_weights.get("goals_differential", 0) * 100,
         "contribution": goals_diff_contrib,
-        "description": f"Goal difference: {goals_diff:+d} ({team.get('goals_for', 0)} GF - {team.get('goals_against', 0)} GA). Strong indicator of overall team quality."
+        "description": f"Goal difference from last {period_stats['goals_stats']['period']} matches: {goals_diff:+.1f}. Strong indicator of team quality."
     }
     total_contribution += goals_diff_contrib
     
-    # 13. WIN RATE - Historical success rate
-    win_rate = wins / total_matches if total_matches > 0 else 0
-    win_rate_contrib = (win_rate - 0.4) * norm_weights.get("win_rate", 0) * 1.2
+    # 13. WIN RATE - Historical success rate (using win_rate period)
+    win_rate_value = period_stats["win_rate_stats"]["win_rate"] / 100
+    win_rate_contrib = (win_rate_value - 0.4) * norm_weights.get("win_rate", 0) * 1.2
     breakdown["win_rate"] = {
-        "raw_value": win_rate * 100,
-        "normalized": win_rate,
+        "raw_value": period_stats["win_rate_stats"]["win_rate"],
+        "normalized": win_rate_value,
         "weight": norm_weights.get("win_rate", 0) * 100,
         "contribution": win_rate_contrib,
-        "description": f"Win rate: {win_rate*100:.1f}% ({wins} wins in {total_matches} matches). Historical success breeds confidence."
+        "description": f"Win rate from last {period_stats['win_rate_stats']['period']} matches: {period_stats['win_rate_stats']['win_rate']:.1f}%. Historical success breeds confidence."
     }
     total_contribution += win_rate_contrib
     
@@ -867,40 +1036,32 @@ async def get_teams():
 
 @api_router.get("/teams/{team_name}")
 async def get_team_details(team_name: str):
-    """Get detailed information about a specific team from real data"""
+    """Get detailed information about a specific team from real data with period-based stats"""
     team_data = API_TEAMS.get(team_name)
     if not team_data:
         raise HTTPException(status_code=404, detail="Team not found")
     
-    # Get recent matches for this team
+    # Get all match history for this team
+    all_team_matches = get_team_match_history(team_name, HISTORICAL_GAMES)
+    
+    # Calculate stats for different periods
+    period_stats = {}
+    for period in [5, 10, 15, None]:  # None = all matches
+        period_label = f"last_{period}" if period else "overall"
+        period_stats[period_label] = calculate_period_stats(all_team_matches, period)
+    
+    # Get recent matches for display (last 10)
     recent_matches = []
-    for game in HISTORICAL_GAMES[-10:]:
-        if game.get("home") == team_name or game.get("away") == team_name:
-            is_home = game.get("home") == team_name
-            opponent = game.get("away") if is_home else game.get("home")
-            result = game.get("result")
-            
-            if result:
-                if (result == "home" and is_home) or (result == "away" and not is_home):
-                    match_result = "won"
-                elif result == "draw":
-                    match_result = "draw"
-                else:
-                    match_result = "lost"
-            else:
-                match_result = "unknown"
-            
-            recent_matches.append({
-                "date": game.get("date"),
-                "opponent": opponent,
-                "home_away": "Home" if is_home else "Away",
-                "score": f"{game.get('home_score', 0)}-{game.get('away_score', 0)}",
-                "result": match_result,
-                "home_team": game.get("home"),
-                "away_team": game.get("away"),
-                "home_score": game.get("home_score"),
-                "away_score": game.get("away_score")
-            })
+    for match_data in all_team_matches[-10:]:
+        recent_matches.append({
+            "date": match_data["date"],
+            "opponent": match_data["opponent"],
+            "home_away": match_data["home_away"].capitalize(),
+            "score": f"{match_data['goals_scored']}-{match_data['goals_conceded']}",
+            "result": match_data["result"],
+            "goals_scored": match_data["goals_scored"],
+            "goals_conceded": match_data["goals_conceded"]
+        })
     
     # Get upcoming fixtures
     upcoming_fixtures = []
@@ -931,7 +1092,7 @@ async def get_team_details(team_name: str):
     avg_goals_scored = goals_scored / total_matches if total_matches > 0 else 0
     avg_goals_conceded = goals_conceded / total_matches if total_matches > 0 else 0
     
-    logger.info(f"📤 Returning details for {team_name}")
+    logger.info(f"📤 Returning details for {team_name} with period-based stats")
     
     return {
         "name": team_name,
@@ -953,7 +1114,8 @@ async def get_team_details(team_name: str):
             "avg_goals_conceded": round(avg_goals_conceded, 2),
             "goal_difference": goals_scored - goals_conceded
         },
-        "recent_matches": recent_matches[:5],
+        "period_stats": period_stats,
+        "recent_matches": recent_matches[:10],
         "upcoming_fixtures": upcoming_fixtures[:3],
         "data_source": "api"
     }
