@@ -1005,7 +1005,7 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     # 1. OFFENSE - Primary attacking factor (using goals period)
     goals_for = period_stats["goals_stats"]["avg_goals_for"]
     offense_value = min(0.95, max(0.50, 0.50 + (goals_for / 3.0 * 0.45)))
-    offense_contrib = (offense_value - 0.5) * norm_weights.get("team_offense", 0) * 2.0
+    offense_contrib = (offense_value - 0.5) * norm_weights.get("team_offense", 0) * 3.0  # Increased from 2.0 to 3.0
     breakdown["team_offense"] = {
         "raw_value": round(offense_value * 100, 1),
         "normalized": offense_value,
@@ -1018,7 +1018,7 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     # 2. DEFENSE - Affects opponent's scoring but also team confidence (using goals period)
     goals_against = period_stats["goals_stats"]["avg_goals_against"]
     defense_value = min(0.95, max(0.50, 0.95 - (goals_against / 3.0 * 0.45)))
-    defense_contrib = (defense_value - 0.5) * norm_weights.get("team_defense", 0) * 0.8
+    defense_contrib = (defense_value - 0.5) * norm_weights.get("team_defense", 0) * 1.2  # Increased from 0.8 to 1.2
     breakdown["team_defense"] = {
         "raw_value": round(defense_value * 100, 1),
         "normalized": defense_value,
@@ -1031,7 +1031,7 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     # 3. RECENT FORM - Current momentum and confidence (using form period)
     form_win_rate = period_stats["form_stats"]["win_rate"]
     form_value = min(0.95, max(0.40, 0.40 + (form_win_rate / 100 * 0.55)))
-    form_contrib = (form_value - 0.5) * norm_weights.get("recent_form", 0) * 1.5
+    form_contrib = (form_value - 0.5) * norm_weights.get("recent_form", 0) * 2.0  # Increased from 1.5 to 2.0
     breakdown["recent_form"] = {
         "raw_value": round(form_value * 100, 1),
         "normalized": form_value,
@@ -1057,12 +1057,12 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     # 5. HOME ADVANTAGE - Significant factor in football
     if is_home:
         home_advantage_value = 0.85  # 85% advantage
-        home_bonus = 0.35 * norm_weights.get("home_advantage", 0)
-        description = "Playing at home (+35% boost): crowd support, familiar pitch, no travel fatigue"
+        home_bonus = 0.45 * norm_weights.get("home_advantage", 0)  # Increased from 0.35 to 0.45
+        description = "Playing at home (+45% boost): crowd support, familiar pitch, no travel fatigue"
     else:
         home_advantage_value = 0.15  # 15% (away disadvantage)
-        home_bonus = -0.25 * norm_weights.get("home_advantage", 0)
-        description = "Playing away (-25% penalty): hostile crowd, travel fatigue, unfamiliar conditions"
+        home_bonus = -0.35 * norm_weights.get("home_advantage", 0)  # Increased from -0.25 to -0.35
+        description = "Playing away (-35% penalty): hostile crowd, travel fatigue, unfamiliar conditions"
     
     breakdown["home_advantage"] = {
         "raw_value": home_advantage_value * 100,
@@ -1181,7 +1181,7 @@ def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data
     
     # 13. WIN RATE - Historical success rate (using win_rate period)
     win_rate_value = period_stats["win_rate_stats"]["win_rate"] / 100
-    win_rate_contrib = (win_rate_value - 0.4) * norm_weights.get("win_rate", 0) * 1.2
+    win_rate_contrib = (win_rate_value - 0.4) * norm_weights.get("win_rate", 0) * 1.8  # Increased from 1.2 to 1.8
     breakdown["win_rate"] = {
         "raw_value": period_stats["win_rate_stats"]["win_rate"],
         "normalized": win_rate_value,
@@ -1281,39 +1281,51 @@ def calculate_confidence(model_prob: float, market_prob: float, home_score: floa
 
 def calculate_outcome_probabilities(home_score: float, away_score: float) -> dict:
     """
-    Convert projected scores to outcome probabilities.
-    Dynamic draw probability - increases when teams are more evenly matched.
+    Convert projected scores to outcome probabilities with realistic draw rates.
+    
+    Improvements:
+    - Reduced draw over-prediction
+    - Lower threshold for "clear winner" (0.5 instead of 0.8)
+    - More realistic draw probability (25-28% instead of 25-40%)
+    - Better differentiation between outcomes
     """
     diff = home_score - away_score
     
-    if diff > 0.8:
+    # Threshold for "clear winner" - lowered from 0.8 to 0.5 for better differentiation
+    CLEAR_WINNER_THRESHOLD = 0.5
+    
+    if diff > CLEAR_WINNER_THRESHOLD:
         # Clear home advantage
-        home_prob = 0.55 + min(diff * 0.1, 0.3)
-        draw_prob = 0.25 - min(diff * 0.05, 0.15)
+        # Scale: 0.5 diff → 55% home, 1.0 diff → 65%, 1.5+ diff → 75%
+        home_prob = 0.55 + min((diff - CLEAR_WINNER_THRESHOLD) * 0.2, 0.3)
+        draw_prob = max(0.15, 0.25 - (diff - CLEAR_WINNER_THRESHOLD) * 0.08)
         away_prob = 1 - home_prob - draw_prob
-    elif diff < -0.8:
+    elif diff < -CLEAR_WINNER_THRESHOLD:
         # Clear away advantage
-        away_prob = 0.55 + min(abs(diff) * 0.1, 0.3)
-        draw_prob = 0.25 - min(abs(diff) * 0.05, 0.15)
+        away_prob = 0.55 + min((abs(diff) - CLEAR_WINNER_THRESHOLD) * 0.2, 0.3)
+        draw_prob = max(0.15, 0.25 - (abs(diff) - CLEAR_WINNER_THRESHOLD) * 0.08)
         home_prob = 1 - away_prob - draw_prob
     else:
-        # Close match - dynamic draw probability based on how evenly matched
-        # Draw probability: 40% when perfectly even (diff=0), declining to 25% at diff=0.8
-        evenness_factor = 1 - min(abs(diff), 0.8) / 0.8  # 1.0 when diff=0, 0.0 when diff=0.8
-        draw_prob = 0.25 + (0.15 * evenness_factor)
+        # Close match (diff between -0.5 and +0.5)
+        # Draw probability: 28% when perfectly even, declining to 25% at ±0.5
+        # This is much more realistic than the previous 40% peak
+        evenness_factor = 1 - abs(diff) / CLEAR_WINNER_THRESHOLD  # 1.0 when diff=0, 0.0 when diff=±0.5
+        draw_prob = 0.25 + (0.03 * evenness_factor)  # Range: 25-28%
         
-        # Split remaining probability between home and away based on score difference
+        # Split remaining probability with bias towards the better team
         remaining = 1 - draw_prob
         if diff >= 0:
-            home_prob = remaining * (0.5 + diff * 0.1)
+            # Home slightly better: scale from 50% (even) to 60% (diff=0.5)
+            home_prob = remaining * (0.5 + diff * 0.2)
             away_prob = remaining - home_prob
         else:
-            away_prob = remaining * (0.5 + abs(diff) * 0.1)
+            # Away slightly better
+            away_prob = remaining * (0.5 + abs(diff) * 0.2)
             home_prob = remaining - away_prob
     
     return {
         "home": round(max(0.05, min(0.85, home_prob)), 3),
-        "draw": round(max(0.10, min(0.40, draw_prob)), 3),
+        "draw": round(max(0.15, min(0.28, draw_prob)), 3),
         "away": round(max(0.05, min(0.85, away_prob)), 3)
     }
 
