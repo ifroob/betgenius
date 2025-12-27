@@ -1284,48 +1284,45 @@ def calculate_outcome_probabilities(home_score: float, away_score: float) -> dic
     Convert projected scores to outcome probabilities with realistic draw rates.
     
     Improvements:
-    - Reduced draw over-prediction
-    - Lower threshold for "clear winner" (0.5 instead of 0.8)
-    - More realistic draw probability (25-28% instead of 25-40%)
+    - Dynamic draw probability based on match evenness
+    - Threshold of 0.8 for "clear winner"
+    - Draw probability ranges from 25-40% based on how evenly matched teams are
     - Better differentiation between outcomes
     """
     diff = home_score - away_score
     
-    # Threshold for "clear winner" - lowered from 0.8 to 0.5 for better differentiation
-    CLEAR_WINNER_THRESHOLD = 0.5
+    # Threshold for "clear winner"
+    CLEAR_WINNER_THRESHOLD = 0.8
     
     if diff > CLEAR_WINNER_THRESHOLD:
         # Clear home advantage
-        # Scale: 0.5 diff → 55% home, 1.0 diff → 65%, 1.5+ diff → 75%
-        home_prob = 0.55 + min((diff - CLEAR_WINNER_THRESHOLD) * 0.2, 0.3)
-        draw_prob = max(0.15, 0.25 - (diff - CLEAR_WINNER_THRESHOLD) * 0.08)
+        home_prob = 0.55 + min(diff * 0.1, 0.3)
+        draw_prob = 0.25 - min(diff * 0.05, 0.15)
         away_prob = 1 - home_prob - draw_prob
     elif diff < -CLEAR_WINNER_THRESHOLD:
         # Clear away advantage
-        away_prob = 0.55 + min((abs(diff) - CLEAR_WINNER_THRESHOLD) * 0.2, 0.3)
-        draw_prob = max(0.15, 0.25 - (abs(diff) - CLEAR_WINNER_THRESHOLD) * 0.08)
+        away_prob = 0.55 + min(abs(diff) * 0.1, 0.3)
+        draw_prob = 0.25 - min(abs(diff) * 0.05, 0.15)
         home_prob = 1 - away_prob - draw_prob
     else:
-        # Close match (diff between -0.5 and +0.5)
-        # Draw probability: 28% when perfectly even, declining to 25% at ±0.5
-        # This is much more realistic than the previous 40% peak
-        evenness_factor = 1 - abs(diff) / CLEAR_WINNER_THRESHOLD  # 1.0 when diff=0, 0.0 when diff=±0.5
-        draw_prob = 0.25 + (0.03 * evenness_factor)  # Range: 25-28%
+        # Close match (diff between -0.8 and +0.8)
+        # Draw probability: 40% when perfectly even (diff=0), declining to 25% at diff=±0.8
+        # This allows draw to be properly selected for evenly matched teams
+        evenness_factor = 1 - min(abs(diff), 0.8) / 0.8  # 1.0 when diff=0, 0.0 when diff=±0.8
+        draw_prob = 0.25 + (0.15 * evenness_factor)  # Range: 25-40%
         
-        # Split remaining probability with bias towards the better team
+        # Split remaining probability between home and away based on score difference
         remaining = 1 - draw_prob
         if diff >= 0:
-            # Home slightly better: scale from 50% (even) to 60% (diff=0.5)
-            home_prob = remaining * (0.5 + diff * 0.2)
+            home_prob = remaining * (0.5 + diff * 0.1)
             away_prob = remaining - home_prob
         else:
-            # Away slightly better
-            away_prob = remaining * (0.5 + abs(diff) * 0.2)
+            away_prob = remaining * (0.5 + abs(diff) * 0.1)
             home_prob = remaining - away_prob
     
     return {
         "home": round(max(0.05, min(0.85, home_prob)), 3),
-        "draw": round(max(0.15, min(0.28, draw_prob)), 3),
+        "draw": round(max(0.10, min(0.40, draw_prob)), 3),
         "away": round(max(0.05, min(0.85, away_prob)), 3)
     }
 
