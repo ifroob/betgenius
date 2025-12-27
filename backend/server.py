@@ -774,27 +774,20 @@ async def fetch_epl_fixtures_from_api():
                 away_team = match["awayTeam"]["name"]
                 match_date_raw = match["utcDate"]
                 status = match["status"]
-                matchday = match.get("matchday", 0)  # Extract matchday/gameweek
-                season = match.get("season", {})
                 
                 # Format datetime
                 from datetime import datetime as dt
                 try:
                     match_dt = dt.fromisoformat(match_date_raw.replace('Z', '+00:00'))
                     match_date = match_dt.strftime('%a, %b %d, %Y at %I:%M %p')
-                    match_date_short = match_dt.strftime('%Y-%m-%d')
                 except:
                     match_date = match_date_raw
-                    match_date_short = match_date_raw[:10]
                 
                 game = {
                     "id": f"api-{match['id']}",
                     "home": home_team,
                     "away": away_team,
                     "date": match_date,
-                    "date_short": match_date_short,
-                    "matchday": matchday,
-                    "season": season.get("startDate", "2024")[:4] if season else "2024",
                     "data_source": "api",
                     "api_id": match["id"],
                     "is_completed": status == "FINISHED"
@@ -1289,43 +1282,39 @@ def calculate_confidence(model_prob: float, market_prob: float, home_score: floa
 def calculate_outcome_probabilities(home_score: float, away_score: float) -> dict:
     """
     Convert projected scores to outcome probabilities.
-    Simplified and more consistent formula for better stability.
+    Dynamic draw probability - increases when teams are more evenly matched.
     """
     diff = home_score - away_score
     
-    # Base draw probability (EPL average is around 25%)
-    base_draw_prob = 0.26
-    
-    # Reduce draw probability as score differential increases
-    # At diff=0: draw_prob = 0.28, at diff=1.0: draw_prob = 0.22, at diff=2.0+: draw_prob = 0.18
-    draw_reduction = min(abs(diff) * 0.06, 0.10)
-    draw_prob = base_draw_prob - draw_reduction
-    
-    # Remaining probability split between home and away based on score differential
-    remaining = 1 - draw_prob
-    
-    # Use sigmoid-like function for smooth probability distribution
-    # At diff=0: 50/50 split, at diff=1: ~65/35, at diff=2: ~80/20
-    home_advantage = 1 / (1 + math.exp(-1.8 * diff))  # Sigmoid centered at 0
-    
-    home_prob = remaining * home_advantage
-    away_prob = remaining * (1 - home_advantage)
-    
-    # Ensure probabilities sum to 1.0 and are within reasonable bounds
-    home_prob = max(0.10, min(0.80, home_prob))
-    away_prob = max(0.10, min(0.80, away_prob))
-    draw_prob = max(0.15, min(0.35, draw_prob))
-    
-    # Normalize to ensure sum = 1.0
-    total = home_prob + draw_prob + away_prob
-    home_prob /= total
-    draw_prob /= total
-    away_prob /= total
+    if diff > 0.8:
+        # Clear home advantage
+        home_prob = 0.55 + min(diff * 0.1, 0.3)
+        draw_prob = 0.25 - min(diff * 0.05, 0.15)
+        away_prob = 1 - home_prob - draw_prob
+    elif diff < -0.8:
+        # Clear away advantage
+        away_prob = 0.55 + min(abs(diff) * 0.1, 0.3)
+        draw_prob = 0.25 - min(abs(diff) * 0.05, 0.15)
+        home_prob = 1 - away_prob - draw_prob
+    else:
+        # Close match - dynamic draw probability based on how evenly matched
+        # Draw probability: 40% when perfectly even (diff=0), declining to 25% at diff=0.8
+        evenness_factor = 1 - min(abs(diff), 0.8) / 0.8  # 1.0 when diff=0, 0.0 when diff=0.8
+        draw_prob = 0.25 + (0.15 * evenness_factor)
+        
+        # Split remaining probability between home and away based on score difference
+        remaining = 1 - draw_prob
+        if diff >= 0:
+            home_prob = remaining * (0.5 + diff * 0.1)
+            away_prob = remaining - home_prob
+        else:
+            away_prob = remaining * (0.5 + abs(diff) * 0.1)
+            home_prob = remaining - away_prob
     
     return {
-        "home": round(home_prob, 4),
-        "draw": round(draw_prob, 4),
-        "away": round(away_prob, 4)
+        "home": round(max(0.05, min(0.85, home_prob)), 3),
+        "draw": round(max(0.10, min(0.40, draw_prob)), 3),
+        "away": round(max(0.05, min(0.85, away_prob)), 3)
     }
 
 # ============ API ROUTES ============
@@ -1486,33 +1475,22 @@ async def refresh_data():
         raise HTTPException(status_code=503, detail="API unavailable - unable to refresh data")
 
 @api_router.get("/games")
-async def get_games(include_historical: bool = False, matchday: Optional[int] = None, group_by_matchday: bool = False):
-    """
-    Get games from real API data
-    
-    Args:
-        include_historical: Include completed historical games
-        matchday: Filter by specific matchday/gameweek (e.g., 1, 2, 3, etc.)
-        group_by_matchday: Return games grouped by matchday instead of flat list
-    """
+async def get_games(include_historical: bool = False):
+    """Get games from real API data"""
     if not API_GAMES:
         logger.warning("⚠️ No API games available")
         raise HTTPException(status_code=503, detail="No games available - API data not loaded")
     
     games = []
     
-    # Collect all games
     for g in API_GAMES:
         home_data = API_TEAMS.get(g["home"], {})
         away_data = API_TEAMS.get(g["away"], {})
-        
-        game_data = {
+        games.append({
             "id": g["id"],
             "home_team": g["home"],
             "away_team": g["away"],
             "match_date": g["date"],
-            "matchday": g.get("matchday", 0),
-            "date_short": g.get("date_short", ""),
             "home_odds": g.get("h_odds", 2.0),
             "draw_odds": g.get("d_odds", 3.0),
             "away_odds": g.get("a_odds", 3.0),
@@ -1524,24 +1502,18 @@ async def get_games(include_historical: bool = False, matchday: Optional[int] = 
             "is_completed": g.get("is_completed", False),
             "data_source": "api",
             "api_id": g.get("api_id")
-        }
-        
-        # Apply matchday filter if specified
-        if matchday is None or g.get("matchday") == matchday:
-            games.append(game_data)
+        })
     
     if include_historical:
         for g in HISTORICAL_GAMES:
             home_data = API_TEAMS.get(g["home"], {})
             away_data = API_TEAMS.get(g["away"], {})
             
-            game_data = {
+            games.append({
                 "id": g["id"],
                 "home_team": g["home"],
                 "away_team": g["away"],
                 "match_date": g["date"],
-                "matchday": g.get("matchday", 0),
-                "date_short": g.get("date_short", ""),
                 "home_odds": g.get("h_odds", 2.0),
                 "draw_odds": g.get("d_odds", 3.0),
                 "away_odds": g.get("a_odds", 3.0),
@@ -1552,34 +1524,7 @@ async def get_games(include_historical: bool = False, matchday: Optional[int] = 
                 "away_score": g.get("away_score"),
                 "is_completed": g.get("is_completed", False),
                 "data_source": "api"
-            }
-            
-            # Apply matchday filter if specified
-            if matchday is None or g.get("matchday") == matchday:
-                games.append(game_data)
-    
-    # Group by matchday if requested
-    if group_by_matchday:
-        matchday_groups = {}
-        for game in games:
-            md = game.get("matchday", 0)
-            if md not in matchday_groups:
-                matchday_groups[md] = []
-            matchday_groups[md].append(game)
-        
-        # Sort matchdays
-        sorted_matchdays = sorted(matchday_groups.keys())
-        
-        result = []
-        for md in sorted_matchdays:
-            result.append({
-                "matchday": md,
-                "games": matchday_groups[md],
-                "game_count": len(matchday_groups[md])
             })
-        
-        logger.info(f"📤 Returning {len(games)} games grouped into {len(result)} matchdays")
-        return {"matchdays": result, "total_games": len(games)}
     
     logger.info(f"📤 Returning {len(games)} games")
     return games
@@ -1641,16 +1586,9 @@ async def delete_model(model_id: str):
     return {"message": "Model deleted"}
 
 @api_router.post("/picks/generate")
-async def generate_picks(model_id: str, min_edge: float = 0.0, min_confidence: int = 1):
-    """
-    Generate picks using real API data with comprehensive analysis
-    
-    Args:
-        model_id: ID of the model to use
-        min_edge: Minimum edge percentage to include (default 0.0 = all picks)
-        min_confidence: Minimum confidence level 1-10 (default 1 = all picks)
-    """
-    logger.info(f"🎯 Generating picks for model: {model_id} (min_edge={min_edge}%, min_conf={min_confidence})")
+async def generate_picks(model_id: str):
+    """Generate picks using real API data with comprehensive analysis"""
+    logger.info(f"🎯 Generating picks for model: {model_id}")
     
     if not API_GAMES:
         raise HTTPException(status_code=503, detail="No games available - API data not loaded")
@@ -1847,25 +1785,9 @@ async def generate_picks(model_id: str, min_edge: float = 0.0, min_confidence: i
             
             logger.info(f"  ✅ Pick: {g['home']} vs {g['away']} → {best_outcome.upper()} (conf: {confidence}/10)")
     
-    # Filter picks by edge and confidence thresholds
-    filtered_picks = []
-    for pick in picks:
-        if pick["edge_percentage"] >= min_edge and pick["confidence_score"] >= min_confidence:
-            filtered_picks.append(pick)
-    
-    filtered_picks.sort(key=lambda x: x["confidence_score"], reverse=True)
-    
-    logger.info(f"📤 Generated {len(picks)} total picks, {len(filtered_picks)} after filtering (min_edge={min_edge}%, min_conf={min_confidence})")
-    
-    return {
-        "picks": filtered_picks,
-        "total_generated": len(picks),
-        "total_filtered": len(filtered_picks),
-        "filters_applied": {
-            "min_edge": min_edge,
-            "min_confidence": min_confidence
-        }
-    }
+    picks.sort(key=lambda x: x["confidence_score"], reverse=True)
+    logger.info(f"📤 Generated {len(picks)} picks")
+    return picks
 
 @api_router.get("/journal")
 async def get_journal():
@@ -2000,69 +1922,24 @@ async def simulate_model(sim_request: SimulationRequest):
     total_return = 0
     stake_per_bet = 10
     
-    # Check if this is xG Poisson model
-    is_xg_model = weights.get("use_xg_model", False)
-    
     for g in games_to_simulate:
-        # Generate prediction based on model type
-        if is_xg_model:
-            # Use xG Poisson model
-            xg_pick = generate_xg_poisson_pick(g, XG_TEAM_STATS, TEAM_STRENGTHS, LEAGUE_AVERAGES)
-            best_outcome = xg_pick["predicted_outcome"]
-            
-            # Calculate confidence for xG model
-            edge = xg_pick["edge_percentage"]
-            lambda_diff = abs(xg_pick["lambda_home"] - xg_pick["lambda_away"])
-            
-            if edge >= 20:
-                confidence = 10
-            elif edge >= 15:
-                confidence = 9
-            elif edge >= 10:
-                confidence = 8
-            elif edge >= 5:
-                confidence = 7
-            elif edge >= 0:
-                confidence = 6
-            elif edge >= -5:
-                confidence = 5
-            elif edge >= -10:
-                confidence = 4
-            elif edge >= -15:
-                confidence = 3
-            else:
-                confidence = 2
-            
-            # Adjust for lambda clarity
-            if lambda_diff >= 1.0:
-                confidence = min(10, confidence + 1)
-            elif lambda_diff < 0.3:
-                confidence = max(1, confidence - 1)
-            
-            probs = xg_pick["probabilities"]
-            model_prob = probs[best_outcome] / 100.0  # Convert from percentage
-        else:
-            # Use traditional weighted model
-            home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
-            away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
-            
-            probs = calculate_outcome_probabilities(home_score, away_score)
-            
-            market_probs = {
-                "home": 1 / g["h_odds"],
-                "draw": 1 / g["d_odds"],
-                "away": 1 / g["a_odds"]
-            }
-            
-            # Pick the outcome with highest model probability
-            best_outcome = max(probs.keys(), key=lambda k: probs[k])
-            edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
-            
-            confidence, _ = calculate_confidence(probs[best_outcome], market_probs[best_outcome], home_score, away_score)
-            model_prob = probs[best_outcome]
+        home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
+        away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
         
-        # Common logic for both model types
+        probs = calculate_outcome_probabilities(home_score, away_score)
+        
+        market_probs = {
+            "home": 1 / g["h_odds"],
+            "draw": 1 / g["d_odds"],
+            "away": 1 / g["a_odds"]
+        }
+        
+        # Pick the outcome with highest model probability (aligns with projected scores)
+        best_outcome = max(probs.keys(), key=lambda k: probs[k])
+        edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+        
         market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
+        confidence, _ = calculate_confidence(probs[best_outcome], market_probs[best_outcome], home_score, away_score)
         
         if sim_request.min_confidence and confidence < sim_request.min_confidence:
             continue
@@ -2144,264 +2021,6 @@ async def simulate_model(sim_request: SimulationRequest):
         "total_return": round(total_return, 2),
         "net_profit": round(net_profit, 2),
         "predictions": predictions
-    }
-
-@api_router.get("/stats")
-async def get_stats():
-    """Get overall betting statistics"""
-    entries = await db.journal.find({}, {"_id": 0}).to_list(1000)
-    
-    total_bets = len(entries)
-    pending_bets = len([e for e in entries if e.get("status") == "pending"])
-    won_bets = len([e for e in entries if e.get("status") == "won"])
-    lost_bets = len([e for e in entries if e.get("status") == "lost"])
-    
-    total_staked = sum(e.get("stake", 0) for e in entries if e.get("status") != "pending")
-    total_profit = sum(e.get("profit_loss", 0) for e in entries)
-    
-    win_rate = (won_bets / (won_bets + lost_bets) * 100) if (won_bets + lost_bets) > 0 else 0
-    roi = (total_profit / total_staked * 100) if total_staked > 0 else 0
-    
-    logger.info(f"📤 Stats: {total_bets} bets, {win_rate:.1f}% win rate, {roi:.1f}% ROI")
-    
-    return {
-        "total_bets": total_bets,
-        "pending_bets": pending_bets,
-        "won_bets": won_bets,
-        "lost_bets": lost_bets,
-        "win_rate": round(win_rate, 1),
-        "total_staked": round(total_staked, 2),
-        "total_profit_loss": round(total_profit, 2),
-        "roi": round(roi, 1),
-        "average_odds": 0.0
-    }
-
-@api_router.get("/matchdays")
-async def get_matchdays():
-    """Get list of available matchdays from both upcoming and historical games"""
-    matchdays = set()
-    
-    # Collect from upcoming games
-    for g in API_GAMES:
-        if g.get("matchday"):
-            matchdays.add(g["matchday"])
-    
-    # Collect from historical games
-    for g in HISTORICAL_GAMES:
-        if g.get("matchday"):
-            matchdays.add(g["matchday"])
-    
-    sorted_matchdays = sorted(list(matchdays))
-    
-    # Get details for each matchday
-    matchday_details = []
-    for md in sorted_matchdays:
-        upcoming_count = sum(1 for g in API_GAMES if g.get("matchday") == md)
-        historical_count = sum(1 for g in HISTORICAL_GAMES if g.get("matchday") == md and g.get("is_completed"))
-        
-        matchday_details.append({
-            "matchday": md,
-            "upcoming_games": upcoming_count,
-            "completed_games": historical_count,
-            "total_games": upcoming_count + historical_count
-        })
-    
-    logger.info(f"📤 Returning {len(matchday_details)} matchdays")
-    return {"matchdays": matchday_details}
-
-@api_router.post("/picks/generate-historical")
-async def generate_historical_picks(
-    model_id: str, 
-    matchday: Optional[int] = None,
-    min_edge: float = 0.0,
-    min_confidence: int = 1
-):
-    """
-    Generate picks for historical matches to backtest model performance
-    
-    Args:
-        model_id: ID of the model to use
-        matchday: Specific matchday to generate picks for (optional)
-        min_edge: Minimum edge percentage filter
-        min_confidence: Minimum confidence level filter
-    """
-    logger.info(f"🎯 Generating historical picks for model: {model_id}, matchday: {matchday}")
-    
-    if not HISTORICAL_GAMES:
-        raise HTTPException(status_code=503, detail="No historical games available")
-    
-    # Get model
-    model = None
-    for p in PRESET_MODELS:
-        if p["id"] == model_id:
-            model = p
-            break
-    
-    if not model:
-        model = await db.models.find_one({"id": model_id}, {"_id": 0})
-    
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-    
-    # Filter historical games by matchday if specified
-    games_to_analyze = []
-    for g in HISTORICAL_GAMES:
-        if g.get("is_completed"):
-            if matchday is None or g.get("matchday") == matchday:
-                games_to_analyze.append(g)
-    
-    if not games_to_analyze:
-        raise HTTPException(status_code=404, detail=f"No completed games found for matchday {matchday}")
-    
-    weights = model["weights"]
-    picks = []
-    
-    # Check if this is the xG Poisson model
-    is_xg_model = weights.get("use_xg_model", False)
-    
-    for g in games_to_analyze:
-        if is_xg_model:
-            # Use xG Poisson model
-            xg_pick = generate_xg_poisson_pick(g, XG_TEAM_STATS, TEAM_STRENGTHS, LEAGUE_AVERAGES)
-            
-            best_outcome = xg_pick["predicted_outcome"]
-            market_odds = {
-                "home": g.get("h_odds", 2.0),
-                "draw": g.get("d_odds", 3.0),
-                "away": g.get("a_odds", 3.0)
-            }[best_outcome]
-            
-            # Calculate confidence
-            lambda_diff = abs(xg_pick["lambda_home"] - xg_pick["lambda_away"])
-            edge = xg_pick["edge_percentage"]
-            
-            if edge >= 20:
-                confidence = 10
-            elif edge >= 15:
-                confidence = 9
-            elif edge >= 10:
-                confidence = 8
-            elif edge >= 5:
-                confidence = 7
-            elif edge >= 0:
-                confidence = 6
-            elif edge >= -5:
-                confidence = 5
-            elif edge >= -10:
-                confidence = 4
-            elif edge >= -15:
-                confidence = 3
-            else:
-                confidence = 2
-            
-            if lambda_diff >= 1.0:
-                confidence = min(10, confidence + 1)
-            elif lambda_diff < 0.3:
-                confidence = max(1, confidence - 1)
-            
-            pick = {
-                "id": f"hist-pick-{model_id}-{g['id']}",
-                "game_id": g.get("id"),
-                "model_id": model_id,
-                "model_name": model["name"],
-                "home_team": g["home"],
-                "away_team": g["away"],
-                "match_date": g["date"],
-                "matchday": g.get("matchday", 0),
-                "predicted_outcome": best_outcome,
-                "projected_home_score": xg_pick["lambda_home"],
-                "projected_away_score": xg_pick["lambda_away"],
-                "market_odds": market_odds,
-                "confidence_score": confidence,
-                "edge_percentage": edge,
-                "model_probability": xg_pick["model_probability"],
-                "actual_result": g.get("result"),
-                "actual_home_score": g.get("home_score"),
-                "actual_away_score": g.get("away_score"),
-                "is_correct": (best_outcome == g.get("result")),
-                "data_source": "historical",
-                "model_type": "xg_poisson"
-            }
-        else:
-            # Use traditional model
-            home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
-            away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
-            
-            probs = calculate_outcome_probabilities(home_score, away_score)
-            
-            market_probs = {
-                "home": 1 / g.get("h_odds", 2.0),
-                "draw": 1 / g.get("d_odds", 3.0),
-                "away": 1 / g.get("a_odds", 3.0)
-            }
-            
-            best_outcome = max(probs.keys(), key=lambda k: probs[k])
-            edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
-            
-            market_odds = {
-                "home": g.get("h_odds", 2.0),
-                "draw": g.get("d_odds", 3.0),
-                "away": g.get("a_odds", 3.0)
-            }[best_outcome]
-            
-            confidence, confidence_explanation = calculate_confidence(
-                probs[best_outcome], 
-                market_probs[best_outcome],
-                home_score,
-                away_score
-            )
-            
-            pick = {
-                "id": f"hist-pick-{model_id}-{g['id']}",
-                "game_id": g.get("id"),
-                "model_id": model_id,
-                "model_name": model["name"],
-                "home_team": g["home"],
-                "away_team": g["away"],
-                "match_date": g["date"],
-                "matchday": g.get("matchday", 0),
-                "predicted_outcome": best_outcome,
-                "projected_home_score": home_score,
-                "projected_away_score": away_score,
-                "market_odds": market_odds,
-                "confidence_score": confidence,
-                "edge_percentage": round(edge, 1),
-                "model_probability": round(probs[best_outcome] * 100, 1),
-                "actual_result": g.get("result"),
-                "actual_home_score": g.get("home_score"),
-                "actual_away_score": g.get("away_score"),
-                "is_correct": (best_outcome == g.get("result")),
-                "data_source": "historical"
-            }
-        
-        picks.append(pick)
-    
-    # Filter by edge and confidence
-    filtered_picks = []
-    for pick in picks:
-        if pick["edge_percentage"] >= min_edge and pick["confidence_score"] >= min_confidence:
-            filtered_picks.append(pick)
-    
-    # Sort by confidence
-    filtered_picks.sort(key=lambda x: x["confidence_score"], reverse=True)
-    
-    # Calculate accuracy
-    correct_picks = sum(1 for p in filtered_picks if p["is_correct"])
-    accuracy = (correct_picks / len(filtered_picks) * 100) if filtered_picks else 0
-    
-    logger.info(f"📤 Generated {len(filtered_picks)} historical picks for matchday {matchday}, accuracy: {accuracy:.1f}%")
-    
-    return {
-        "picks": filtered_picks,
-        "total_generated": len(picks),
-        "total_filtered": len(filtered_picks),
-        "correct_predictions": correct_picks,
-        "accuracy_percentage": round(accuracy, 2),
-        "matchday": matchday,
-        "filters_applied": {
-            "min_edge": min_edge,
-            "min_confidence": min_confidence
-        }
     }
 
 @api_router.get("/stats")
