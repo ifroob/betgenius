@@ -939,16 +939,16 @@ def get_period_based_stats(team_name: str, periods: dict) -> dict:
             "win_rate_stats": {"win_rate": 50, "matches": 0}
         }
     
-    # Get form period stats
-    form_period = periods.get("form_period", 10)
+    # Get form period stats (convert to int to fix slice issue)
+    form_period = int(periods.get("form_period", 10))
     form_stats = calculate_period_stats(team_matches, form_period)
     
-    # Get goals period stats
-    goals_period = periods.get("goals_period", 10)
+    # Get goals period stats (convert to int to fix slice issue)
+    goals_period = int(periods.get("goals_period", 10))
     goals_stats = calculate_period_stats(team_matches, goals_period)
     
-    # Get win rate period stats
-    win_rate_period = periods.get("win_rate_period", 10)
+    # Get win rate period stats (convert to int to fix slice issue)
+    win_rate_period = int(periods.get("win_rate_period", 10))
     win_rate_stats = calculate_period_stats(team_matches, win_rate_period)
     
     return {
