@@ -33,6 +33,12 @@ import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -502,6 +508,10 @@ function App() {
   const [teamDetails, setTeamDetails] = useState(null);
   const [teamDetailsLoading, setTeamDetailsLoading] = useState(false);
 
+  // Matchday states
+  const [matchdays, setMatchdays] = useState([]);
+  const [expandedMatchday, setExpandedMatchday] = useState(null);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
@@ -557,8 +567,19 @@ function App() {
     fetchTeamDetails(teamName);
   };
 
+  // Fetch matchdays
+  const fetchMatchdays = async () => {
+    try {
+      const res = await axios.get(`${API}/matchdays`);
+      setMatchdays(res.data.matchdays || []);
+    } catch (err) {
+      console.error("Error fetching matchdays:", err);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchMatchdays();
   }, [fetchData]);
 
   // Generate picks for selected model
@@ -568,6 +589,16 @@ function App() {
       const res = await axios.post(`${API}/picks/generate?model_id=${modelId}`);
       setPicks(res.data);
       setSelectedModel(modelId);
+      
+      // Determine current matchday and set it as expanded by default
+      if (res.data.length > 0) {
+        const picksWithMatchday = res.data.filter(p => p.matchday);
+        if (picksWithMatchday.length > 0) {
+          const minMatchday = Math.min(...picksWithMatchday.map(p => p.matchday));
+          setExpandedMatchday(minMatchday);
+        }
+      }
+      
       toast.success("Picks generated!");
     } catch (err) {
       toast.error("Failed to generate picks");
@@ -682,6 +713,43 @@ function App() {
   };
 
   const totalWeights = Object.values(weights).reduce((a, b) => a + b, 0);
+
+  // Helper function to group picks by matchday
+  const groupPicksByMatchday = () => {
+    const grouped = {};
+    picks.forEach(pick => {
+      const matchday = pick.matchday || 0;
+      if (!grouped[matchday]) {
+        grouped[matchday] = [];
+      }
+      grouped[matchday].push(pick);
+    });
+    
+    // Sort picks within each matchday by confidence
+    Object.keys(grouped).forEach(matchday => {
+      grouped[matchday].sort((a, b) => b.confidence_score - a.confidence_score);
+    });
+    
+    return grouped;
+  };
+
+  // Get current and next matchday
+  const getCurrentAndNextMatchday = () => {
+    if (picks.length === 0) return { current: null, next: null };
+    
+    const picksWithMatchday = picks.filter(p => p.matchday);
+    if (picksWithMatchday.length === 0) return { current: null, next: null };
+    
+    const matchdayNumbers = [...new Set(picksWithMatchday.map(p => p.matchday))].sort((a, b) => a - b);
+    
+    return {
+      current: matchdayNumbers[0] || null,
+      next: matchdayNumbers[1] || null
+    };
+  };
+
+  const groupedPicks = groupPicksByMatchday();
+  const { current: currentMatchday, next: nextMatchday } = getCurrentAndNextMatchday();
 
   return (
     <div className="App min-h-screen bg-[#09090b]">
@@ -1175,27 +1243,37 @@ function App() {
 
             {/* Picks Table */}
             {picks.length > 0 ? (
-              <Card className="bg-zinc-900/50 border-zinc-800 overflow-hidden">
-                <CardHeader>
-                  <CardTitle className="text-lg font-display text-zinc-100">Value Picks</CardTitle>
-                  <CardDescription className="text-zinc-500">Sorted by confidence score</CardDescription>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-zinc-800 bg-zinc-800/50">
-                          <th className="text-left p-4 text-xs text-zinc-500 uppercase tracking-wider">Match</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Projected</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Pick</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Odds</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Edge</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Confidence</th>
-                          <th className="text-right p-4 text-xs text-zinc-500 uppercase tracking-wider">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {picks.map((pick) => (
+              <div className="space-y-6">
+                {currentMatchday && groupedPicks[currentMatchday] && (
+                  <Card className="bg-zinc-900/50 border-zinc-800 overflow-hidden">
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-lg font-display text-zinc-100">
+                            Matchday {currentMatchday} <Badge className="ml-2 bg-green-500/20 text-green-500 border-green-500/40 text-xs">Current</Badge>
+                          </CardTitle>
+                          <CardDescription className="text-zinc-500">
+                            {groupedPicks[currentMatchday].length} {groupedPicks[currentMatchday].length === 1 ? 'match' : 'matches'} • Sorted by confidence
+                          </CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-zinc-800 bg-zinc-800/50">
+                              <th className="text-left p-4 text-xs text-zinc-500 uppercase tracking-wider">Match</th>
+                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Projected</th>
+                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Pick</th>
+                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Odds</th>
+                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Edge</th>
+                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Confidence</th>
+                              <th className="text-right p-4 text-xs text-zinc-500 uppercase tracking-wider">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {groupedPicks[currentMatchday].map((pick) => (
                           <>
                             <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
                               <td className="p-4">
@@ -1504,6 +1582,349 @@ function App() {
                   </div>
                 </CardContent>
               </Card>
+            )}
+
+            {/* Next Matchday */}
+            {nextMatchday && groupedPicks[nextMatchday] && (
+              <Card className="bg-zinc-900/50 border-zinc-800 overflow-hidden">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-lg font-display text-zinc-100">
+                        Matchday {nextMatchday} <Badge className="ml-2 bg-blue-500/20 text-blue-400 border-blue-500/40 text-xs">Next</Badge>
+                      </CardTitle>
+                      <CardDescription className="text-zinc-500">
+                        {groupedPicks[nextMatchday].length} {groupedPicks[nextMatchday].length === 1 ? 'match' : 'matches'} • Sorted by confidence
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-zinc-800 bg-zinc-800/50">
+                          <th className="text-left p-4 text-xs text-zinc-500 uppercase tracking-wider">Match</th>
+                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Projected</th>
+                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Pick</th>
+                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Odds</th>
+                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Edge</th>
+                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Confidence</th>
+                          <th className="text-right p-4 text-xs text-zinc-500 uppercase tracking-wider">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupedPicks[nextMatchday].map((pick) => (
+                          <>
+                            <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
+                              <td className="p-4">
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-zinc-200">
+                                    <button
+                                      onClick={() => handleTeamClick(pick.home_team)}
+                                      className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                                      data-testid={`team-link-${pick.home_team}`}
+                                    >
+                                      {pick.home_team}
+                                    </button>
+                                    {' vs '}
+                                    <button
+                                      onClick={() => handleTeamClick(pick.away_team)}
+                                      className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
+                                      data-testid={`team-link-${pick.away_team}`}
+                                    >
+                                      {pick.away_team}
+                                    </button>
+                                  </p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs text-zinc-500">{pick.match_date}</p>
+                                    {pick.model_type === "xg_poisson" && (
+                                      <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40 text-xs">
+                                        xG Poisson
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4 text-center">
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="font-mono text-sm text-zinc-300 cursor-help border-b border-dotted border-zinc-600">
+                                        {pick.projected_home_score} - {pick.projected_away_score}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
+                                      <div className="space-y-1">
+                                        {pick.model_type === "xg_poisson" ? (
+                                          <>
+                                            <p className="font-semibold text-purple-400">xG Poisson Expected Goals (λ)</p>
+                                            <p className="text-xs">Home λ: {pick.projected_home_score}</p>
+                                            <p className="text-xs">Away λ: {pick.projected_away_score}</p>
+                                            <p className="text-xs text-zinc-400 mt-2 italic">
+                                              Lambda values represent expected goals calculated from team xG statistics and league averages
+                                            </p>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <p className="font-semibold text-green-400">Projected Score Calculation</p>
+                                            <p className="text-xs">Base: 1.5 goals/team (EPL average)</p>
+                                            <p className="text-xs">Home: 1.5 {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(2) || '0.00'} = {pick.projected_home_score}</p>
+                                            <p className="text-xs">Away: 1.5 {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(2) || '0.00'} = {pick.projected_away_score}</p>
+                                            <p className="text-xs text-zinc-400 mt-2 italic">Adjustments from all weighted factors (offense, defense, form, etc.)</p>
+                                          </>
+                                        )}
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </td>
+                              <td className="p-4 text-center">
+                                <OutcomeBadge outcome={pick.predicted_outcome} />
+                              </td>
+                              <td className="p-4 text-center">
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="font-mono text-sm text-green-400 cursor-help border-b border-dotted border-green-600">
+                                        {pick.market_odds.toFixed(2)}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Market Odds</p>
+                                        <p className="text-xs">Current bookmaker odds for {pick.predicted_outcome.toUpperCase()}</p>
+                                        <p className="text-xs text-zinc-400 mt-2">All odds:</p>
+                                        <p className="text-xs">Home: {pick.all_market_odds?.home?.toFixed(2)}</p>
+                                        <p className="text-xs">Draw: {pick.all_market_odds?.draw?.toFixed(2)}</p>
+                                        <p className="text-xs">Away: {pick.all_market_odds?.away?.toFixed(2)}</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </td>
+                              <td className="p-4 text-center">
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className={`font-mono text-sm cursor-help border-b border-dotted ${pick.edge_percentage > 0 ? 'text-green-500 border-green-600' : 'text-red-500 border-red-600'}`}>
+                                        {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Edge Percentage</p>
+                                        <p className="text-xs">Model prob: {pick.model_probability}%</p>
+                                        <p className="text-xs">Market prob: {pick.market_probability}%</p>
+                                        <p className="text-xs text-zinc-400 mt-2 italic">Edge = (Model - Market) / Market × 100</p>
+                                        <p className="text-xs text-zinc-400">Positive edge suggests value bet opportunity</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </td>
+                              <td className="p-4 text-center">
+                                <TooltipProvider delayDuration={200}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-help">
+                                        <ConfidenceBadge score={pick.confidence_score} />
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-green-400">Confidence Score (1-10)</p>
+                                        <p className="text-xs font-semibold">{pick.confidence_explanation?.strength || 'N/A'}</p>
+                                        <p className="text-xs text-zinc-300">{pick.confidence_explanation?.reasoning || 'Based on edge and probability'}</p>
+                                        <div className="text-xs text-zinc-400 mt-2 space-y-0.5">
+                                          <p>• Edge: {pick.confidence_explanation?.edge?.toFixed(1)}%</p>
+                                          <p>• Score diff: {pick.confidence_explanation?.score_differential?.toFixed(2)}</p>
+                                        </div>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </td>
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-zinc-400 hover:text-green-500 hover:bg-green-500/10"
+                                    onClick={() => setExpandedPick(expandedPick === pick.id ? null : pick.id)}
+                                    data-testid={`expand-reasoning-${pick.id}`}
+                                  >
+                                    {expandedPick === pick.id ? <ChevronDown className="w-4 h-4" /> : <Info className="w-4 h-4" />}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    className="bg-green-600 hover:bg-green-500 text-white text-xs"
+                                    onClick={() => { setSelectedPick(pick); setBetOdds(pick.market_odds.toString()); setShowAddBetDialog(true); }}
+                                    data-testid={`add-bet-${pick.id}`}
+                                  >
+                                    Add to Journal
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                            {expandedPick === pick.id && (
+                              <tr key={`${pick.id}-reasoning`} className="border-b border-zinc-800/50 bg-zinc-900/80">
+                                <td colSpan="7" className="p-6">
+                                  <div className="space-y-6">
+                                    {/* Header */}
+                                    <div className="flex items-center justify-between">
+                                      <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider flex items-center gap-2">
+                                        <Info className="w-4 h-4 text-green-500" />
+                                        Pick Reasoning & Calculation Details
+                                      </h4>
+                                      <div className="flex items-center gap-4 text-xs">
+                                        <div>
+                                          <span className="text-zinc-500">Model Probability: </span>
+                                          <span className="font-mono font-semibold text-green-400">{pick.model_probability}%</span>
+                                        </div>
+                                        <div>
+                                          <span className="text-zinc-500">Market Probability: </span>
+                                          <span className="font-mono font-semibold text-zinc-400">{pick.market_probability}%</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Conditional Display: xG Poisson Model vs Regular Model */}
+                                    {pick.model_type === "xg_poisson" ? (
+                                      <PoissonModelDisplay pick={pick} />
+                                    ) : (
+                                      <>
+                                        {/* Regular Model Display */}
+                                        {/* Calculation Summary Section */}
+                                        <div className="grid md:grid-cols-2 gap-4">
+                                      <div className="bg-gradient-to-br from-green-500/10 to-transparent border border-green-500/30 rounded-lg p-4">
+                                        <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">Score Calculation</h5>
+                                        <div className="space-y-2 text-xs text-zinc-300">
+                                          <div className="flex justify-between">
+                                            <span className="text-zinc-500">Base Score (EPL avg):</span>
+                                            <span className="font-mono">1.50</span>
+                                          </div>
+                                          <div className="flex justify-between border-t border-zinc-700/50 pt-2">
+                                            <span className="text-blue-400">{pick.home_team} Adjustments:</span>
+                                            <span className="font-mono text-blue-400">
+                                              {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(3) || '0.000'}
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between font-semibold text-blue-400">
+                                            <span>{pick.home_team} Final Score:</span>
+                                            <span className="font-mono">{pick.projected_home_score}</span>
+                                          </div>
+                                          <div className="flex justify-between border-t border-zinc-700/50 pt-2">
+                                            <span className="text-orange-400">{pick.away_team} Adjustments:</span>
+                                            <span className="font-mono text-orange-400">
+                                              {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(3) || '0.000'}
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between font-semibold text-orange-400">
+                                            <span>{pick.away_team} Final Score:</span>
+                                            <span className="font-mono">{pick.projected_away_score}</span>
+                                          </div>
+                                        </div>
+                                        <p className="text-xs text-zinc-500 italic mt-3">
+                                          Adjustments come from weighted factors: offense, defense, form, injuries, home advantage, etc.
+                                        </p>
+                                      </div>
+
+                                      <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/30 rounded-lg p-4">
+                                        <h5 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">Confidence Breakdown</h5>
+                                        <div className="space-y-2 text-xs text-zinc-300">
+                                          <div className="flex justify-between">
+                                            <span className="text-zinc-500">Confidence Score:</span>
+                                            <span className="font-mono font-bold text-green-400">{pick.confidence_score}/10</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span className="text-zinc-500">Strength:</span>
+                                            <span className="font-semibold">{pick.confidence_explanation?.strength || 'N/A'}</span>
+                                          </div>
+                                          <div className="border-t border-zinc-700/50 pt-2 space-y-1">
+                                            <p className="text-zinc-400">{pick.confidence_explanation?.reasoning || 'Based on edge and probabilities'}</p>
+                                          </div>
+                                          <div className="border-t border-zinc-700/50 pt-2 space-y-1">
+                                            <div className="flex justify-between">
+                                              <span className="text-zinc-500">Edge:</span>
+                                              <span className={`font-mono ${pick.edge_percentage > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
+                                              </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                              <span className="text-zinc-500">Score Differential:</span>
+                                              <span className="font-mono">{Math.abs(pick.projected_home_score - pick.projected_away_score).toFixed(2)}</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <p className="text-xs text-zinc-500 italic mt-3">
+                                          Confidence considers edge %, model probability strength, and score clarity
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* All Outcome Probabilities */}
+                                    <div className="bg-zinc-800/50 border border-zinc-700/50 rounded p-4">
+                                      <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">All Outcome Probabilities</h5>
+                                      <div className="grid grid-cols-3 gap-4 text-xs">
+                                        <div className="text-center">
+                                          <p className="text-zinc-500 mb-2">HOME WIN</p>
+                                          <p className="font-mono text-sm text-blue-400 mb-1">{pick.all_probabilities?.home || 0}%</p>
+                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.home).toFixed(1)}%</p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500 mb-2">DRAW</p>
+                                          <p className="font-mono text-sm text-zinc-400 mb-1">{pick.all_probabilities?.draw || 0}%</p>
+                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.draw).toFixed(1)}%</p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500 mb-2">AWAY WIN</p>
+                                          <p className="font-mono text-sm text-orange-400 mb-1">{pick.all_probabilities?.away || 0}%</p>
+                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.away).toFixed(1)}%</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Factor Breakdowns */}
+                                    <div>
+                                      <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">Factor-by-Factor Breakdown</h5>
+                                      <div className="grid md:grid-cols-2 gap-6">
+                                        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+                                          <FactorBreakdown 
+                                            breakdown={pick.home_breakdown} 
+                                            teamName={`${pick.home_team} (Home)`}
+                                          />
+                                        </div>
+                                        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
+                                          <FactorBreakdown 
+                                            breakdown={pick.away_breakdown} 
+                                            teamName={`${pick.away_team} (Away)`}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Summary */}
+                                    <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
+                                      💡 <span className="font-semibold">How it works:</span> Each factor's contribution = (team rating - baseline) × factor weight × multiplier. 
+                                      Positive contributions increase the projected score. The final score determines outcome probabilities, 
+                                      which are compared to market odds to find value bets.
+                                    </div>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
             ) : (
               <Card className="bg-zinc-900/50 border-zinc-800">
                 <CardContent className="p-12 text-center">
