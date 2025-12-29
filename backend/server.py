@@ -151,6 +151,7 @@ class SimulationRequest(BaseModel):
     model_id: str
     game_ids: Optional[List[str]] = None
     min_confidence: Optional[int] = None
+    matchday: Optional[int] = None  # Simulate specific matchday
 
 class SimulationResult(BaseModel):
     model_id: str
@@ -164,6 +165,17 @@ class SimulationResult(BaseModel):
     average_odds: float
     total_stake: float
     total_return: float
+
+class MatchdayRequest(BaseModel):
+    model_id: str
+    matchday: int
+
+class MatchdayInfo(BaseModel):
+    matchday: int
+    total_games: int
+    completed_games: int
+    upcoming_games: int
+    season: Optional[int] = None
 
 # ============ GLOBAL DATA STORAGE ============
 API_GAMES = []
@@ -774,6 +786,8 @@ async def fetch_epl_fixtures_from_api():
                 away_team = match["awayTeam"]["name"]
                 match_date_raw = match["utcDate"]
                 status = match["status"]
+                matchday = match.get("matchday", 0)  # Get matchday/gameweek number
+                season = match.get("season", {}).get("id")
                 
                 # Format datetime
                 from datetime import datetime as dt
@@ -788,6 +802,8 @@ async def fetch_epl_fixtures_from_api():
                     "home": home_team,
                     "away": away_team,
                     "date": match_date,
+                    "matchday": matchday,  # Add matchday info
+                    "season": season,  # Add season info
                     "data_source": "api",
                     "api_id": match["id"],
                     "is_completed": status == "FINISHED"
@@ -1911,7 +1927,13 @@ async def simulate_model(sim_request: SimulationRequest):
         raise HTTPException(status_code=404, detail="Model not found")
     
     games_to_simulate = []
-    if sim_request.game_ids:
+    if sim_request.matchday:
+        # Filter by specific matchday
+        logger.info(f"📅 Filtering for Matchday {sim_request.matchday}")
+        games_to_simulate = [g for g in HISTORICAL_GAMES if g.get("is_completed") and g.get("matchday") == sim_request.matchday]
+        if not games_to_simulate:
+            raise HTTPException(status_code=400, detail=f"No completed games found for Matchday {sim_request.matchday}")
+    elif sim_request.game_ids:
         for game_id in sim_request.game_ids:
             for g in HISTORICAL_GAMES:
                 if g["id"] == game_id and g.get("is_completed"):
@@ -2078,7 +2100,7 @@ async def simulate_model(sim_request: SimulationRequest):
     
     logger.info(f"✅ Simulation complete: {accuracy:.1f}% accuracy, ROI: {roi:.1f}%")
     
-    return {
+    result = {
         "model_id": sim_request.model_id,
         "model_name": model["name"],
         "total_games": total_predictions,
@@ -2092,6 +2114,355 @@ async def simulate_model(sim_request: SimulationRequest):
         "total_return": round(total_return, 2),
         "net_profit": round(net_profit, 2),
         "predictions": predictions
+    }
+    
+    # Add matchday info if filtering by matchday
+    if sim_request.matchday:
+        result["matchday"] = sim_request.matchday
+    
+    return result
+
+@api_router.get("/matchdays")
+async def get_matchdays():
+    """Get all available matchdays with game counts"""
+    logger.info("📅 Getting all matchdays")
+    
+    # Combine both historical and upcoming games
+    all_games = HISTORICAL_GAMES + API_GAMES
+    
+    if not all_games:
+        return {"matchdays": [], "message": "No games loaded"}
+    
+    # Group games by matchday
+    matchday_dict = {}
+    for game in all_games:
+        matchday = game.get("matchday", 0)
+        if matchday not in matchday_dict:
+            matchday_dict[matchday] = {
+                "matchday": matchday,
+                "total_games": 0,
+                "completed_games": 0,
+                "upcoming_games": 0,
+                "season": game.get("season")
+            }
+        
+        matchday_dict[matchday]["total_games"] += 1
+        if game.get("is_completed"):
+            matchday_dict[matchday]["completed_games"] += 1
+        else:
+            matchday_dict[matchday]["upcoming_games"] += 1
+    
+    # Convert to sorted list
+    matchdays = sorted(matchday_dict.values(), key=lambda x: x["matchday"])
+    
+    logger.info(f"📤 Found {len(matchdays)} matchdays")
+    return {"matchdays": matchdays}
+
+@api_router.get("/matchdays/{matchday}/games")
+async def get_matchday_games(matchday: int):
+    """Get all games for a specific matchday"""
+    logger.info(f"📅 Getting games for Matchday {matchday}")
+    
+    # Get from both historical and upcoming
+    all_games = HISTORICAL_GAMES + API_GAMES
+    matchday_games = [g for g in all_games if g.get("matchday") == matchday]
+    
+    if not matchday_games:
+        raise HTTPException(status_code=404, detail=f"No games found for Matchday {matchday}")
+    
+    # Separate by status
+    completed = [g for g in matchday_games if g.get("is_completed")]
+    upcoming = [g for g in matchday_games if not g.get("is_completed")]
+    
+    logger.info(f"📤 Matchday {matchday}: {len(completed)} completed, {len(upcoming)} upcoming")
+    
+    return {
+        "matchday": matchday,
+        "total_games": len(matchday_games),
+        "completed_games": len(completed),
+        "upcoming_games": len(upcoming),
+        "completed": completed,
+        "upcoming": upcoming
+    }
+
+@api_router.post("/matchdays/{matchday}/picks")
+async def generate_matchday_picks(matchday: int, model_id: str):
+    """Generate picks for a specific matchday"""
+    logger.info(f"🎯 Generating picks for Matchday {matchday} with model: {model_id}")
+    
+    # Get upcoming games for this matchday
+    matchday_games = [g for g in API_GAMES if g.get("matchday") == matchday and not g.get("is_completed")]
+    
+    if not matchday_games:
+        raise HTTPException(status_code=404, detail=f"No upcoming games found for Matchday {matchday}")
+    
+    # Get model
+    model = None
+    for p in PRESET_MODELS:
+        if p["id"] == model_id:
+            model = p
+            break
+    
+    if not model:
+        model = await db.models.find_one({"id": model_id}, {"_id": 0})
+    
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    weights = model["weights"]
+    picks = []
+    
+    # Check if this is the xG Poisson model
+    is_xg_model = weights.get("use_xg_model", False)
+    
+    logger.info(f"📊 Using {'xG Poisson' if is_xg_model else 'traditional'} model for Matchday {matchday}")
+    
+    for g in matchday_games:
+        if is_xg_model:
+            xg_pick = generate_xg_poisson_pick(g, XG_TEAM_STATS, TEAM_STRENGTHS, LEAGUE_AVERAGES)
+            
+            best_outcome = xg_pick["predicted_outcome"]
+            market_odds = {
+                "home": g.get("h_odds", 2.0),
+                "draw": g.get("d_odds", 3.0),
+                "away": g.get("a_odds", 3.0)
+            }[best_outcome]
+            
+            # Calculate confidence based on edge and lambda values
+            lambda_diff = abs(xg_pick["lambda_home"] - xg_pick["lambda_away"])
+            edge = xg_pick["edge_percentage"]
+            
+            if edge >= 20:
+                confidence = 10
+            elif edge >= 15:
+                confidence = 9
+            elif edge >= 10:
+                confidence = 8
+            elif edge >= 5:
+                confidence = 7
+            elif edge >= 0:
+                confidence = 6
+            elif edge >= -5:
+                confidence = 5
+            elif edge >= -10:
+                confidence = 4
+            elif edge >= -15:
+                confidence = 3
+            else:
+                confidence = 2
+            
+            if lambda_diff >= 1.0:
+                confidence = min(10, confidence + 1)
+            elif lambda_diff < 0.3:
+                confidence = max(1, confidence - 1)
+            
+            confidence_explanation = {
+                "strength": "Very Strong" if confidence >= 8 else "Strong" if confidence >= 6 else "Moderate" if confidence >= 4 else "Weak",
+                "reasoning": f"xG Poisson model predicts {best_outcome.upper()} with {xg_pick['model_probability']}% probability (edge: {edge:+.1f}%). Expected goals: {xg_pick['lambda_home']:.2f} - {xg_pick['lambda_away']:.2f}",
+                "edge": edge,
+                "model_probability": xg_pick["model_probability"],
+                "market_probability": xg_pick["market_probability"],
+                "lambda_home": xg_pick["lambda_home"],
+                "lambda_away": xg_pick["lambda_away"]
+            }
+            
+            pick = {
+                "id": f"pick-{model_id}-{g['id']}",
+                "game_id": g.get("id"),
+                "model_id": model_id,
+                "model_name": model["name"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "matchday": matchday,
+                "predicted_outcome": best_outcome,
+                "projected_home_score": xg_pick["lambda_home"],
+                "projected_away_score": xg_pick["lambda_away"],
+                "market_odds": market_odds,
+                "confidence_score": confidence,
+                "confidence_explanation": confidence_explanation,
+                "edge_percentage": edge,
+                "model_probability": xg_pick["model_probability"],
+                "market_probability": xg_pick["market_probability"],
+                "all_probabilities": xg_pick["probabilities"],
+                "all_market_odds": {
+                    "home": g.get("h_odds", 2.0),
+                    "draw": g.get("d_odds", 3.0),
+                    "away": g.get("a_odds", 3.0)
+                },
+                "xg_breakdown": xg_pick["xg_breakdown"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "model_type": "xg_poisson"
+            }
+            picks.append(pick)
+        else:
+            # Traditional model
+            home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
+            away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
+            
+            probs = calculate_outcome_probabilities(home_score, away_score)
+            
+            market_probs = {
+                "home": 1 / g.get("h_odds", 2.0),
+                "draw": 1 / g.get("d_odds", 3.0),
+                "away": 1 / g.get("a_odds", 3.0)
+            }
+            
+            best_outcome = max(probs.keys(), key=lambda k: probs[k])
+            edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+            
+            market_odds = {
+                "home": g.get("h_odds", 2.0),
+                "draw": g.get("d_odds", 3.0),
+                "away": g.get("a_odds", 3.0)
+            }[best_outcome]
+            
+            confidence, confidence_explanation = calculate_confidence(
+                probs[best_outcome], 
+                market_probs[best_outcome],
+                home_score,
+                away_score
+            )
+            
+            pick = {
+                "id": f"pick-{model_id}-{g['id']}",
+                "game_id": g.get("id"),
+                "model_id": model_id,
+                "model_name": model["name"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "matchday": matchday,
+                "predicted_outcome": best_outcome,
+                "projected_home_score": home_score,
+                "projected_away_score": away_score,
+                "market_odds": market_odds,
+                "confidence_score": confidence,
+                "confidence_explanation": confidence_explanation,
+                "edge_percentage": round(edge, 1),
+                "model_probability": round(probs[best_outcome] * 100, 1),
+                "market_probability": round(market_probs[best_outcome] * 100, 1),
+                "all_probabilities": {
+                    "home": round(probs["home"] * 100, 1),
+                    "draw": round(probs["draw"] * 100, 1),
+                    "away": round(probs["away"] * 100, 1)
+                },
+                "all_market_odds": {
+                    "home": g.get("h_odds", 2.0),
+                    "draw": g.get("d_odds", 3.0),
+                    "away": g.get("a_odds", 3.0)
+                },
+                "home_breakdown": home_breakdown,
+                "away_breakdown": away_breakdown,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            picks.append(pick)
+    
+    picks.sort(key=lambda x: x["confidence_score"], reverse=True)
+    logger.info(f"📤 Generated {len(picks)} picks for Matchday {matchday}")
+    
+    return {
+        "matchday": matchday,
+        "model_id": model_id,
+        "model_name": model["name"],
+        "total_picks": len(picks),
+        "picks": picks
+    }
+
+@api_router.post("/matchdays/{matchday}/simulate")
+async def simulate_matchday(matchday: int, model_id: str):
+    """Backtest a model on a specific completed matchday"""
+    logger.info(f"🎮 Simulating Matchday {matchday} with model: {model_id}")
+    
+    # Create a simulation request for this specific matchday
+    sim_request = SimulationRequest(
+        model_id=model_id,
+        matchday=matchday
+    )
+    
+    # Use the existing simulate_model function
+    result = await simulate_model(sim_request)
+    
+    # Add matchday info to result
+    result["matchday"] = matchday
+    
+    return result
+
+@api_router.post("/matchdays/simulate-range")
+async def simulate_matchday_range(model_id: str, start_matchday: int, end_matchday: int):
+    """Backtest a model across a range of matchdays"""
+    logger.info(f"🎮 Simulating Matchdays {start_matchday}-{end_matchday} with model: {model_id}")
+    
+    if start_matchday > end_matchday:
+        raise HTTPException(status_code=400, detail="start_matchday must be <= end_matchday")
+    
+    # Get model
+    model = None
+    for p in PRESET_MODELS:
+        if p["id"] == model_id:
+            model = p
+            break
+    
+    if not model:
+        model = await db.models.find_one({"id": model_id}, {"_id": 0})
+    
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    matchday_results = []
+    overall_correct = 0
+    overall_total = 0
+    overall_stake = 0
+    overall_return = 0
+    
+    for matchday in range(start_matchday, end_matchday + 1):
+        try:
+            sim_request = SimulationRequest(model_id=model_id, matchday=matchday)
+            result = await simulate_model(sim_request)
+            
+            matchday_results.append({
+                "matchday": matchday,
+                "total_games": result["total_games"],
+                "correct_predictions": result["correct_predictions"],
+                "accuracy_percentage": result["accuracy_percentage"],
+                "roi": result["simulated_roi"],
+                "net_profit": result["net_profit"]
+            })
+            
+            overall_correct += result["correct_predictions"]
+            overall_total += result["total_games"]
+            overall_stake += result["total_stake"]
+            overall_return += result["total_return"]
+            
+        except HTTPException as e:
+            if e.status_code == 400:
+                # No games for this matchday, skip it
+                logger.info(f"⏭️  Skipping Matchday {matchday} - no completed games")
+                continue
+            raise
+    
+    if overall_total == 0:
+        raise HTTPException(status_code=400, detail=f"No completed games found in matchday range {start_matchday}-{end_matchday}")
+    
+    overall_accuracy = (overall_correct / overall_total) * 100
+    overall_roi = ((overall_return - overall_stake) / overall_stake) * 100 if overall_stake > 0 else 0
+    
+    logger.info(f"✅ Range simulation complete: {overall_accuracy:.1f}% accuracy across {overall_total} games")
+    
+    return {
+        "model_id": model_id,
+        "model_name": model["name"],
+        "matchday_range": f"{start_matchday}-{end_matchday}",
+        "matchday_results": matchday_results,
+        "overall_summary": {
+            "total_games": overall_total,
+            "correct_predictions": overall_correct,
+            "accuracy_percentage": round(overall_accuracy, 2),
+            "total_stake": overall_stake,
+            "total_return": round(overall_return, 2),
+            "net_profit": round(overall_return - overall_stake, 2),
+            "roi": round(overall_roi, 2)
+        }
     }
 
 @api_router.get("/stats")
