@@ -1931,24 +1931,86 @@ async def simulate_model(sim_request: SimulationRequest):
     total_return = 0
     stake_per_bet = 10
     
+    # Check if this is the xG Poisson model (CRITICAL: Must match generate_picks logic)
+    is_xg_model = weights.get("use_xg_model", False)
+    
+    if is_xg_model:
+        logger.info("📊 Running simulation with xG Poisson model")
+    else:
+        logger.info("📊 Running simulation with traditional weighted factor model")
+    
     for g in games_to_simulate:
-        home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
-        away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
-        
-        probs = calculate_outcome_probabilities(home_score, away_score)
-        
-        market_probs = {
-            "home": 1 / g["h_odds"],
-            "draw": 1 / g["d_odds"],
-            "away": 1 / g["a_odds"]
-        }
-        
-        # Pick the outcome with highest model probability (aligns with projected scores)
-        best_outcome = max(probs.keys(), key=lambda k: probs[k])
-        edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+        if is_xg_model:
+            # Use xG Poisson model for simulation (matches generate_picks logic)
+            xg_pick = generate_xg_poisson_pick(g, XG_TEAM_STATS, TEAM_STRENGTHS, LEAGUE_AVERAGES)
+            
+            best_outcome = xg_pick["predicted_outcome"]
+            probs = {
+                "home": xg_pick["probabilities"]["home"] / 100,
+                "draw": xg_pick["probabilities"]["draw"] / 100,
+                "away": xg_pick["probabilities"]["away"] / 100
+            }
+            
+            market_probs = {
+                "home": 1 / g["h_odds"],
+                "draw": 1 / g["d_odds"],
+                "away": 1 / g["a_odds"]
+            }
+            
+            edge = xg_pick["edge_percentage"]
+            lambda_home = xg_pick["lambda_home"]
+            lambda_away = xg_pick["lambda_away"]
+            
+            # Calculate confidence for xG model (matches generate_picks logic)
+            lambda_diff = abs(lambda_home - lambda_away)
+            
+            if edge >= 20:
+                confidence = 10
+            elif edge >= 15:
+                confidence = 9
+            elif edge >= 10:
+                confidence = 8
+            elif edge >= 5:
+                confidence = 7
+            elif edge >= 0:
+                confidence = 6
+            elif edge >= -5:
+                confidence = 5
+            elif edge >= -10:
+                confidence = 4
+            elif edge >= -15:
+                confidence = 3
+            else:
+                confidence = 2
+            
+            # Adjust for lambda clarity
+            if lambda_diff >= 1.0:
+                confidence = min(10, confidence + 1)
+            elif lambda_diff < 0.3:
+                confidence = max(1, confidence - 1)
+            
+            home_score = lambda_home
+            away_score = lambda_away
+        else:
+            # Use traditional weighted factor model for simulation
+            home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
+            away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
+            
+            probs = calculate_outcome_probabilities(home_score, away_score)
+            
+            market_probs = {
+                "home": 1 / g["h_odds"],
+                "draw": 1 / g["d_odds"],
+                "away": 1 / g["a_odds"]
+            }
+            
+            # Pick the outcome with highest model probability (aligns with projected scores)
+            best_outcome = max(probs.keys(), key=lambda k: probs[k])
+            edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+            
+            confidence, _ = calculate_confidence(probs[best_outcome], market_probs[best_outcome], home_score, away_score)
         
         market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
-        confidence, _ = calculate_confidence(probs[best_outcome], market_probs[best_outcome], home_score, away_score)
         
         if sim_request.min_confidence and confidence < sim_request.min_confidence:
             continue
