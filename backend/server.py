@@ -192,6 +192,57 @@ FOOTBALL_API_URL = "https://api.football-data.org/v4"
 # ============ XG POISSON MODEL IMPLEMENTATION ============
 import math
 
+# ============ TEMPORAL CONSISTENCY FUNCTIONS ============
+def filter_games_before_matchday(games, target_matchday):
+    """
+    Filter games to only include those from matchdays before the target matchday.
+    This ensures temporal consistency - no look-ahead bias.
+    
+    Args:
+        games: List of game dictionaries
+        target_matchday: The matchday being tested (exclusive)
+    
+    Returns:
+        List of games from matchdays < target_matchday
+    """
+    filtered = [g for g in games if g.get("matchday", 0) < target_matchday and g.get("is_completed")]
+    logger.info(f"🕐 Temporal filter: {len(filtered)} games available before Matchday {target_matchday}")
+    return filtered
+
+def calculate_temporal_stats(target_matchday, all_historical_games):
+    """
+    Calculate team statistics using only data available before the target matchday.
+    This prevents look-ahead bias in backtesting.
+    
+    Args:
+        target_matchday: The matchday being tested
+        all_historical_games: All available historical games
+    
+    Returns:
+        tuple: (xg_stats, league_averages, team_strengths, team_stats, filtered_games)
+    """
+    logger.info(f"📊 Calculating temporal stats for Matchday {target_matchday}")
+    
+    # Filter to only games before target matchday
+    temporal_games = filter_games_before_matchday(all_historical_games, target_matchday)
+    
+    if not temporal_games:
+        logger.warning(f"⚠️ No historical games before Matchday {target_matchday}")
+        # Return default values
+        return {}, {"league_avg_xG": 1.50, "league_home_avg": 1.45, "league_away_avg": 1.15}, {}, {}, []
+    
+    # Calculate xG stats from temporal games only
+    xg_stats = calculate_xg_stats_from_matches(temporal_games)
+    league_avgs = calculate_league_averages(xg_stats)
+    team_strengths = calculate_team_strength(xg_stats, league_avgs)
+    
+    # Calculate team stats for traditional models
+    team_stats = calculate_team_stats_from_matches(temporal_games)
+    
+    logger.info(f"✅ Temporal stats calculated: {len(xg_stats)} teams, {len(temporal_games)} games")
+    
+    return xg_stats, league_avgs, team_strengths, team_stats, temporal_games
+
 def calculate_xg_stats_from_matches(matches):
     """
     Calculate xG and xGA for each team from actual match data.
@@ -937,16 +988,20 @@ PRESET_MODELS = [
 ]
 
 # ============ HELPER FUNCTIONS ============
-def get_period_based_stats(team_name: str, periods: dict) -> dict:
+def get_period_based_stats(team_name: str, periods: dict, historical_games=None) -> dict:
     """
     Get period-based statistics for a team
     Args:
         team_name: Name of the team
         periods: Dict with form_period, goals_period, win_rate_period
+        historical_games: Optional custom match list (for temporal consistency)
     Returns:
         Dict with period-specific stats
     """
-    team_matches = get_team_match_history(team_name, HISTORICAL_GAMES)
+    if historical_games is None:
+        historical_games = HISTORICAL_GAMES
+    
+    team_matches = get_team_match_history(team_name, historical_games)
     
     if not team_matches:
         return {
@@ -987,23 +1042,36 @@ def get_period_based_stats(team_name: str, periods: dict) -> dict:
         }
     }
 
-def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data: dict = None) -> tuple:
-    """Calculate projected score based on REAL team data with period-based customization"""
-    team = API_TEAMS.get(team_name)
+def calculate_team_score(team_name: str, weights: dict, is_home: bool, game_data: dict = None, team_stats=None, historical_games=None) -> tuple:
+    """
+    Calculate projected score based on REAL team data with period-based customization
+    
+    Args:
+        team_name: Name of the team
+        weights: Model weights
+        is_home: Whether team is playing at home
+        game_data: Optional game-specific data
+        team_stats: Optional custom team stats (for temporal consistency)
+        historical_games: Optional custom match list (for temporal consistency)
+    """
+    if team_stats is None:
+        team_stats = API_TEAMS
+    
+    team = team_stats.get(team_name)
     if not team:
-        logger.warning(f"⚠️ Team {team_name} not found in API_TEAMS")
+        logger.warning(f"⚠️ Team {team_name} not found in team stats")
         return 1.5, {}
     
     if game_data is None:
         game_data = {}
     
-    # Get period-based stats
+    # Get period-based stats (with temporal consistency if provided)
     periods = {
         "form_period": weights.get("form_period", 10),
         "goals_period": weights.get("goals_period", 10),
         "win_rate_period": weights.get("win_rate_period", 10)
     }
-    period_stats = get_period_based_stats(team_name, periods)
+    period_stats = get_period_based_stats(team_name, periods, historical_games)
     
     # Normalize weights (exclude period settings from weight calculation)
     weight_keys = [k for k in weights.keys() if not k.endswith('_period')]
@@ -1909,7 +1977,7 @@ async def delete_journal_entry(entry_id: str):
 
 @api_router.post("/simulate")
 async def simulate_model(sim_request: SimulationRequest):
-    """Run backtesting simulation on real historical data"""
+    """Run backtesting simulation on real historical data with temporal consistency"""
     logger.info(f"🎮 Running simulation for model: {sim_request.model_id}")
     
     if not HISTORICAL_GAMES:
@@ -1928,26 +1996,36 @@ async def simulate_model(sim_request: SimulationRequest):
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     
-    games_to_simulate = []
+    # Determine which matchdays to simulate
+    matchdays_to_simulate = []
+    
     if sim_request.matchday:
-        # Filter by specific matchday
-        logger.info(f"📅 Filtering for Matchday {sim_request.matchday}")
-        games_to_simulate = [g for g in HISTORICAL_GAMES if g.get("is_completed") and g.get("matchday") == sim_request.matchday]
-        if not games_to_simulate:
-            raise HTTPException(status_code=400, detail=f"No completed games found for Matchday {sim_request.matchday}")
+        # Single matchday specified
+        matchdays_to_simulate = [sim_request.matchday]
     elif sim_request.game_ids:
+        # Extract matchdays from specified games
         for game_id in sim_request.game_ids:
             for g in HISTORICAL_GAMES:
                 if g["id"] == game_id and g.get("is_completed"):
-                    games_to_simulate.append(g)
+                    md = g.get("matchday", 0)
+                    if md and md not in matchdays_to_simulate:
+                        matchdays_to_simulate.append(md)
+        matchdays_to_simulate.sort()
     else:
-        games_to_simulate = [g for g in HISTORICAL_GAMES if g.get("is_completed")]
+        # Auto mode: simulate across all completed matchdays sequentially
+        all_matchdays = set()
+        for g in HISTORICAL_GAMES:
+            if g.get("is_completed") and g.get("matchday"):
+                all_matchdays.add(g.get("matchday"))
+        matchdays_to_simulate = sorted(list(all_matchdays))
     
-    if not games_to_simulate:
-        raise HTTPException(status_code=400, detail="No completed games available for simulation")
+    if not matchdays_to_simulate:
+        raise HTTPException(status_code=400, detail="No matchdays available for simulation")
+    
+    logger.info(f"📅 Simulating matchdays: {matchdays_to_simulate}")
     
     weights = model["weights"]
-    predictions = []
+    all_predictions = []
     correct = 0
     confidence_stats = {}
     outcome_stats = {"home": {"total": 0, "correct": 0}, "draw": {"total": 0, "correct": 0}, "away": {"total": 0, "correct": 0}}
@@ -1955,125 +2033,154 @@ async def simulate_model(sim_request: SimulationRequest):
     total_return = 0
     stake_per_bet = 10
     
-    # Check if this is the xG Poisson model (CRITICAL: Must match generate_picks logic)
+    # Check if this is the xG Poisson model
     is_xg_model = weights.get("use_xg_model", False)
     
     if is_xg_model:
-        logger.info("📊 Running simulation with xG Poisson model")
+        logger.info("📊 Running simulation with xG Poisson model (temporal consistency enabled)")
     else:
-        logger.info("📊 Running simulation with traditional weighted factor model")
+        logger.info("📊 Running simulation with traditional weighted factor model (temporal consistency enabled)")
     
-    for g in games_to_simulate:
-        if is_xg_model:
-            # Use xG Poisson model for simulation (matches generate_picks logic)
-            xg_pick = generate_xg_poisson_pick(g, XG_TEAM_STATS, TEAM_STRENGTHS, LEAGUE_AVERAGES)
-            
-            best_outcome = xg_pick["predicted_outcome"]
-            probs = {
-                "home": xg_pick["probabilities"]["home"] / 100,
-                "draw": xg_pick["probabilities"]["draw"] / 100,
-                "away": xg_pick["probabilities"]["away"] / 100
-            }
-            
-            market_probs = {
-                "home": 1 / g["h_odds"],
-                "draw": 1 / g["d_odds"],
-                "away": 1 / g["a_odds"]
-            }
-            
-            edge = xg_pick["edge_percentage"]
-            lambda_home = xg_pick["lambda_home"]
-            lambda_away = xg_pick["lambda_away"]
-            
-            # Calculate confidence for xG model (matches generate_picks logic)
-            lambda_diff = abs(lambda_home - lambda_away)
-            
-            if edge >= 20:
-                confidence = 10
-            elif edge >= 15:
-                confidence = 9
-            elif edge >= 10:
-                confidence = 8
-            elif edge >= 5:
-                confidence = 7
-            elif edge >= 0:
-                confidence = 6
-            elif edge >= -5:
-                confidence = 5
-            elif edge >= -10:
-                confidence = 4
-            elif edge >= -15:
-                confidence = 3
-            else:
-                confidence = 2
-            
-            # Adjust for lambda clarity
-            if lambda_diff >= 1.0:
-                confidence = min(10, confidence + 1)
-            elif lambda_diff < 0.3:
-                confidence = max(1, confidence - 1)
-            
-            home_score = lambda_home
-            away_score = lambda_away
-        else:
-            # Use traditional weighted factor model for simulation
-            home_score, home_breakdown = calculate_team_score(g["home"], weights, is_home=True, game_data=g)
-            away_score, away_breakdown = calculate_team_score(g["away"], weights, is_home=False, game_data=g)
-            
-            probs = calculate_outcome_probabilities(home_score, away_score)
-            
-            market_probs = {
-                "home": 1 / g["h_odds"],
-                "draw": 1 / g["d_odds"],
-                "away": 1 / g["a_odds"]
-            }
-            
-            # Pick the outcome with highest model probability (aligns with projected scores)
-            best_outcome = max(probs.keys(), key=lambda k: probs[k])
-            edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
-            
-            confidence, _ = calculate_confidence(probs[best_outcome], market_probs[best_outcome], home_score, away_score)
+    # Simulate each matchday sequentially with temporal consistency
+    for target_matchday in matchdays_to_simulate:
+        logger.info(f"🎯 Simulating Matchday {target_matchday}...")
         
-        market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
+        # Get games for this matchday
+        matchday_games = [g for g in HISTORICAL_GAMES if g.get("matchday") == target_matchday and g.get("is_completed")]
         
-        if sim_request.min_confidence and confidence < sim_request.min_confidence:
+        if not matchday_games:
+            logger.warning(f"⚠️ No completed games for Matchday {target_matchday}, skipping")
             continue
         
-        actual_result = g.get("result")
-        is_correct = (best_outcome == actual_result)
+        # Calculate temporal stats using only data BEFORE this matchday
+        temporal_xg_stats, temporal_league_avgs, temporal_team_strengths, temporal_team_stats, temporal_games = calculate_temporal_stats(
+            target_matchday, HISTORICAL_GAMES
+        )
         
-        if is_correct:
-            correct += 1
+        logger.info(f"  📊 Using {len(temporal_games)} historical games for stats calculation")
         
-        if confidence not in confidence_stats:
-            confidence_stats[confidence] = {"total": 0, "correct": 0}
-        confidence_stats[confidence]["total"] += 1
-        if is_correct:
-            confidence_stats[confidence]["correct"] += 1
-        
-        outcome_stats[best_outcome]["total"] += 1
-        if is_correct:
-            outcome_stats[best_outcome]["correct"] += 1
-        
-        total_stake += stake_per_bet
-        if is_correct:
-            total_return += stake_per_bet * market_odds
-        
-        predictions.append({
-            "game_id": g["id"],
-            "home_team": g["home"],
-            "away_team": g["away"],
-            "match_date": g["date"],
-            "predicted_outcome": best_outcome,
-            "actual_result": actual_result,
-            "correct": is_correct,
-            "confidence": confidence,
-            "odds": market_odds,
-            "home_score_actual": g.get("home_score"),
-            "away_score_actual": g.get("away_score")
-        })
+        # Generate predictions for this matchday using temporal data
+        for g in matchday_games:
+            if is_xg_model:
+                # Use xG Poisson model with temporal stats
+                xg_pick = generate_xg_poisson_pick(g, temporal_xg_stats, temporal_team_strengths, temporal_league_avgs)
+                
+                best_outcome = xg_pick["predicted_outcome"]
+                probs = {
+                    "home": xg_pick["probabilities"]["home"] / 100,
+                    "draw": xg_pick["probabilities"]["draw"] / 100,
+                    "away": xg_pick["probabilities"]["away"] / 100
+                }
+                
+                market_probs = {
+                    "home": 1 / g["h_odds"],
+                    "draw": 1 / g["d_odds"],
+                    "away": 1 / g["a_odds"]
+                }
+                
+                edge = xg_pick["edge_percentage"]
+                lambda_home = xg_pick["lambda_home"]
+                lambda_away = xg_pick["lambda_away"]
+                
+                # Calculate confidence for xG model
+                lambda_diff = abs(lambda_home - lambda_away)
+                
+                if edge >= 20:
+                    confidence = 10
+                elif edge >= 15:
+                    confidence = 9
+                elif edge >= 10:
+                    confidence = 8
+                elif edge >= 5:
+                    confidence = 7
+                elif edge >= 0:
+                    confidence = 6
+                elif edge >= -5:
+                    confidence = 5
+                elif edge >= -10:
+                    confidence = 4
+                elif edge >= -15:
+                    confidence = 3
+                else:
+                    confidence = 2
+                
+                # Adjust for lambda clarity
+                if lambda_diff >= 1.0:
+                    confidence = min(10, confidence + 1)
+                elif lambda_diff < 0.3:
+                    confidence = max(1, confidence - 1)
+                
+                home_score = lambda_home
+                away_score = lambda_away
+            else:
+                # Use traditional weighted factor model with temporal stats
+                home_score, home_breakdown = calculate_team_score(
+                    g["home"], weights, is_home=True, game_data=g,
+                    team_stats=temporal_team_stats, historical_games=temporal_games
+                )
+                away_score, away_breakdown = calculate_team_score(
+                    g["away"], weights, is_home=False, game_data=g,
+                    team_stats=temporal_team_stats, historical_games=temporal_games
+                )
+                
+                probs = calculate_outcome_probabilities(home_score, away_score)
+                
+                market_probs = {
+                    "home": 1 / g["h_odds"],
+                    "draw": 1 / g["d_odds"],
+                    "away": 1 / g["a_odds"]
+                }
+                
+                # Pick the outcome with highest model probability
+                best_outcome = max(probs.keys(), key=lambda k: probs[k])
+                edge = (probs[best_outcome] - market_probs[best_outcome]) / market_probs[best_outcome] * 100
+                
+                confidence, _ = calculate_confidence(probs[best_outcome], market_probs[best_outcome], home_score, away_score)
+            
+            market_odds = {"home": g["h_odds"], "draw": g["d_odds"], "away": g["a_odds"]}[best_outcome]
+            
+            # Filter by confidence if specified
+            if sim_request.min_confidence and confidence < sim_request.min_confidence:
+                continue
+            
+            actual_result = g.get("result")
+            is_correct = (best_outcome == actual_result)
+            
+            if is_correct:
+                correct += 1
+            
+            if confidence not in confidence_stats:
+                confidence_stats[confidence] = {"total": 0, "correct": 0}
+            confidence_stats[confidence]["total"] += 1
+            if is_correct:
+                confidence_stats[confidence]["correct"] += 1
+            
+            outcome_stats[best_outcome]["total"] += 1
+            if is_correct:
+                outcome_stats[best_outcome]["correct"] += 1
+            
+            total_stake += stake_per_bet
+            if is_correct:
+                total_return += stake_per_bet * market_odds
+            
+            all_predictions.append({
+                "game_id": g["id"],
+                "home_team": g["home"],
+                "away_team": g["away"],
+                "match_date": g["date"],
+                "matchday": target_matchday,
+                "predicted_outcome": best_outcome,
+                "actual_result": actual_result,
+                "correct": is_correct,
+                "confidence": confidence,
+                "odds": market_odds,
+                "home_score_actual": g.get("home_score"),
+                "away_score_actual": g.get("away_score"),
+                "projected_home_score": round(home_score, 2),
+                "projected_away_score": round(away_score, 2)
+            })
     
-    total_predictions = len(predictions)
+    total_predictions = len(all_predictions)
     if total_predictions == 0:
         raise HTTPException(status_code=400, detail="No predictions generated")
     
@@ -2100,7 +2207,7 @@ async def simulate_model(sim_request: SimulationRequest):
             "accuracy": round(acc, 1)
         }
     
-    logger.info(f"✅ Simulation complete: {accuracy:.1f}% accuracy, ROI: {roi:.1f}%")
+    logger.info(f"✅ Simulation complete: {accuracy:.1f}% accuracy, ROI: {roi:.1f}% across {len(matchdays_to_simulate)} matchdays")
     
     result = {
         "model_id": sim_request.model_id,
@@ -2115,10 +2222,12 @@ async def simulate_model(sim_request: SimulationRequest):
         "total_stake": total_stake,
         "total_return": round(total_return, 2),
         "net_profit": round(net_profit, 2),
-        "predictions": predictions
+        "predictions": all_predictions,
+        "matchdays_tested": matchdays_to_simulate,
+        "temporal_consistency": True
     }
     
-    # Add matchday info if filtering by matchday
+    # Add matchday info if filtering by single matchday
     if sim_request.matchday:
         result["matchday"] = sim_request.matchday
     
