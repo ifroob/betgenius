@@ -511,6 +511,8 @@ function App() {
   // Matchday states
   const [matchdays, setMatchdays] = useState([]);
   const [expandedMatchday, setExpandedMatchday] = useState(null);
+  const [showOnlyUpcoming, setShowOnlyUpcoming] = useState(true);
+  const [selectedMatchdayForSim, setSelectedMatchdayForSim] = useState(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -606,6 +608,31 @@ function App() {
     setLoading(false);
   };
 
+  // Generate picks for a specific matchday
+  const generateMatchdayPicks = async (matchdayNum, modelId) => {
+    if (!modelId) {
+      toast.error("Please select a model first");
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API}/matchdays/${matchdayNum}/picks?model_id=${modelId}`);
+      
+      // Merge with existing picks, replacing picks for this matchday
+      const otherPicks = picks.filter(p => p.matchday !== matchdayNum);
+      const allPicks = [...otherPicks, ...res.data];
+      
+      setPicks(allPicks);
+      setExpandedMatchday(matchdayNum);
+      toast.success(`Generated ${res.data.length} picks for Matchday ${matchdayNum}`);
+    } catch (err) {
+      toast.error(`Failed to generate picks for Matchday ${matchdayNum}`);
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
   // Create new model
   const createModel = async () => {
     if (!newModelName.trim()) {
@@ -693,7 +720,7 @@ function App() {
     }
   };
 
-  const runSimulation = async (modelId) => {
+  const runSimulation = async (modelId, matchdayFilter = null) => {
     if (!modelId) {
       toast.error("Please select a model");
       return;
@@ -701,7 +728,12 @@ function App() {
 
     setSimulationLoading(true);
     try {
-      const response = await axios.post(`${API}/simulate`, { model_id: modelId });
+      const payload = { model_id: modelId };
+      if (matchdayFilter) {
+        payload.matchday = matchdayFilter;
+      }
+      
+      const response = await axios.post(`${API}/simulate`, payload);
       setSimulationResults(response.data);
       toast.success(`Simulation complete: ${response.data.accuracy_percentage}% accuracy`);
     } catch (err) {
@@ -1214,7 +1246,7 @@ function App() {
 
           {/* Picks Tab (Value Finder) */}
           <TabsContent value="picks" className="space-y-6" data-testid="picks-content">
-            {/* Model Selector */}
+            {/* Model Selector and Filters */}
             <Card className="bg-zinc-900/50 border-zinc-800">
               <CardContent className="p-4">
                 <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
@@ -1232,389 +1264,164 @@ function App() {
                       </SelectContent>
                     </Select>
                   </div>
+                  
                   {selectedModel && (
-                    <Badge className="bg-green-500/20 text-green-500 border-green-500/40">
-                      {picks.length} picks generated
-                    </Badge>
+                    <>
+                      <Badge className="bg-green-500/20 text-green-500 border-green-500/40">
+                        {picks.length} picks generated
+                      </Badge>
+                      
+                      {/* Filter Toggle */}
+                      <Button
+                        size="sm"
+                        variant={showOnlyUpcoming ? "default" : "outline"}
+                        className={showOnlyUpcoming ? "bg-green-600 hover:bg-green-500 text-white" : "border-zinc-700 text-zinc-400"}
+                        onClick={() => setShowOnlyUpcoming(!showOnlyUpcoming)}
+                      >
+                        {showOnlyUpcoming ? "Showing Upcoming" : "Show All"}
+                      </Button>
+                    </>
                   )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Picks Table */}
-            {picks.length > 0 ? (
-              <div className="space-y-6">
-                {currentMatchday && groupedPicks[currentMatchday] && (
-                  <Card className="bg-zinc-900/50 border-zinc-800 overflow-hidden">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <CardTitle className="text-lg font-display text-zinc-100">
-                            Matchday {currentMatchday} <Badge className="ml-2 bg-green-500/20 text-green-500 border-green-500/40 text-xs">Current</Badge>
-                          </CardTitle>
-                          <CardDescription className="text-zinc-500">
-                            {groupedPicks[currentMatchday].length} {groupedPicks[currentMatchday].length === 1 ? 'match' : 'matches'} • Sorted by confidence
-                          </CardDescription>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
-                          <thead>
-                            <tr className="border-b border-zinc-800 bg-zinc-800/50">
-                              <th className="text-left p-4 text-xs text-zinc-500 uppercase tracking-wider">Match</th>
-                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Projected</th>
-                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Pick</th>
-                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Odds</th>
-                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Edge</th>
-                              <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Confidence</th>
-                              <th className="text-right p-4 text-xs text-zinc-500 uppercase tracking-wider">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {groupedPicks[currentMatchday].map((pick) => (
-                          <>
-                            <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
-                              <td className="p-4">
-                                <div className="space-y-1">
-                                  <p className="text-sm font-medium text-zinc-200">
-                                    <button
-                                      onClick={() => handleTeamClick(pick.home_team)}
-                                      className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
-                                      data-testid={`team-link-${pick.home_team}`}
-                                    >
-                                      {pick.home_team}
-                                    </button>
-                                    {' vs '}
-                                    <button
-                                      onClick={() => handleTeamClick(pick.away_team)}
-                                      className="text-green-400 hover:text-green-300 hover:underline cursor-pointer transition-colors"
-                                      data-testid={`team-link-${pick.away_team}`}
-                                    >
-                                      {pick.away_team}
-                                    </button>
-                                  </p>
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-xs text-zinc-500">{pick.match_date}</p>
-                                    {pick.model_type === "xg_poisson" && (
-                                      <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/40 text-xs">
-                                        xG Poisson
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="p-4 text-center">
-                                <TooltipProvider delayDuration={200}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="font-mono text-sm text-zinc-300 cursor-help border-b border-dotted border-zinc-600">
-                                        {pick.projected_home_score} - {pick.projected_away_score}
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
-                                      <div className="space-y-1">
-                                        {pick.model_type === "xg_poisson" ? (
-                                          <>
-                                            <p className="font-semibold text-purple-400">xG Poisson Expected Goals (λ)</p>
-                                            <p className="text-xs">Home λ: {pick.projected_home_score}</p>
-                                            <p className="text-xs">Away λ: {pick.projected_away_score}</p>
-                                            <p className="text-xs text-zinc-400 mt-2 italic">
-                                              Lambda values represent expected goals calculated from team xG statistics and league averages
-                                            </p>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <p className="font-semibold text-green-400">Projected Score Calculation</p>
-                                            <p className="text-xs">Base: 1.5 goals/team (EPL average)</p>
-                                            <p className="text-xs">Home: 1.5 {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(2) || '0.00'} = {pick.projected_home_score}</p>
-                                            <p className="text-xs">Away: 1.5 {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(2) || '0.00'} = {pick.projected_away_score}</p>
-                                            <p className="text-xs text-zinc-400 mt-2 italic">Adjustments from all weighted factors (offense, defense, form, etc.)</p>
-                                          </>
-                                        )}
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </td>
-                              <td className="p-4 text-center">
-                                <OutcomeBadge outcome={pick.predicted_outcome} />
-                              </td>
-                              <td className="p-4 text-center">
-                                <TooltipProvider delayDuration={200}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="font-mono text-sm text-green-400 cursor-help border-b border-dotted border-green-600">
-                                        {pick.market_odds.toFixed(2)}
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
-                                      <div className="space-y-1">
-                                        <p className="font-semibold text-green-400">Market Odds</p>
-                                        <p className="text-xs">Current bookmaker odds for {pick.predicted_outcome.toUpperCase()}</p>
-                                        <p className="text-xs text-zinc-400 mt-2">All odds:</p>
-                                        <p className="text-xs">Home: {pick.all_market_odds?.home?.toFixed(2)}</p>
-                                        <p className="text-xs">Draw: {pick.all_market_odds?.draw?.toFixed(2)}</p>
-                                        <p className="text-xs">Away: {pick.all_market_odds?.away?.toFixed(2)}</p>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </td>
-                              <td className="p-4 text-center">
-                                <TooltipProvider delayDuration={200}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className={`font-mono text-sm cursor-help border-b border-dotted ${pick.edge_percentage > 0 ? 'text-green-500 border-green-600' : 'text-red-500 border-red-600'}`}>
-                                        {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
-                                      <div className="space-y-1">
-                                        <p className="font-semibold text-green-400">Edge Percentage</p>
-                                        <p className="text-xs">Model prob: {pick.model_probability}%</p>
-                                        <p className="text-xs">Market prob: {pick.market_probability}%</p>
-                                        <p className="text-xs text-zinc-400 mt-2 italic">Edge = (Model - Market) / Market × 100</p>
-                                        <p className="text-xs text-zinc-400">Positive edge suggests value bet opportunity</p>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </td>
-                              <td className="p-4 text-center">
-                                <TooltipProvider delayDuration={200}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="cursor-help">
-                                        <ConfidenceBadge score={pick.confidence_score} />
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-sm">
-                                      <div className="space-y-1">
-                                        <p className="font-semibold text-green-400">Confidence Score (1-10)</p>
-                                        <p className="text-xs font-semibold">{pick.confidence_explanation?.strength || 'N/A'}</p>
-                                        <p className="text-xs text-zinc-300">{pick.confidence_explanation?.reasoning || 'Based on edge and probability'}</p>
-                                        <div className="text-xs text-zinc-400 mt-2 space-y-0.5">
-                                          <p>• Edge: {pick.confidence_explanation?.edge?.toFixed(1)}%</p>
-                                          <p>• Score diff: {pick.confidence_explanation?.score_differential?.toFixed(2)}</p>
-                                        </div>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </td>
-                              <td className="p-4 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="text-zinc-400 hover:text-green-500 hover:bg-green-500/10"
-                                    onClick={() => setExpandedPick(expandedPick === pick.id ? null : pick.id)}
-                                    data-testid={`expand-reasoning-${pick.id}`}
-                                  >
-                                    {expandedPick === pick.id ? <ChevronDown className="w-4 h-4" /> : <Info className="w-4 h-4" />}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    className="bg-green-600 hover:bg-green-500 text-white text-xs"
-                                    onClick={() => { setSelectedPick(pick); setBetOdds(pick.market_odds.toString()); setShowAddBetDialog(true); }}
-                                    data-testid={`add-bet-${pick.id}`}
-                                  >
-                                    Add to Journal
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                            {expandedPick === pick.id && (
-                              <tr key={`${pick.id}-reasoning`} className="border-b border-zinc-800/50 bg-zinc-900/80">
-                                <td colSpan="7" className="p-6">
-                                  <div className="space-y-6">
-                                    {/* Header */}
-                                    <div className="flex items-center justify-between">
-                                      <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider flex items-center gap-2">
-                                        <Info className="w-4 h-4 text-green-500" />
-                                        Pick Reasoning & Calculation Details
-                                      </h4>
-                                      <div className="flex items-center gap-4 text-xs">
-                                        <div>
-                                          <span className="text-zinc-500">Model Probability: </span>
-                                          <span className="font-mono font-semibold text-green-400">{pick.model_probability}%</span>
-                                        </div>
-                                        <div>
-                                          <span className="text-zinc-500">Market Probability: </span>
-                                          <span className="font-mono font-semibold text-zinc-400">{pick.market_probability}%</span>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Conditional Display: xG Poisson Model vs Regular Model */}
-                                    {pick.model_type === "xg_poisson" ? (
-                                      <PoissonModelDisplay pick={pick} />
-                                    ) : (
-                                      <>
-                                        {/* Regular Model Display */}
-                                        {/* Calculation Summary Section */}
-                                        <div className="grid md:grid-cols-2 gap-4">
-                                      <div className="bg-gradient-to-br from-green-500/10 to-transparent border border-green-500/30 rounded-lg p-4">
-                                        <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">Score Calculation</h5>
-                                        <div className="space-y-2 text-xs text-zinc-300">
-                                          <div className="flex justify-between">
-                                            <span className="text-zinc-500">Base Score (EPL avg):</span>
-                                            <span className="font-mono">1.50</span>
-                                          </div>
-                                          <div className="flex justify-between border-t border-zinc-700/50 pt-2">
-                                            <span className="text-blue-400">{pick.home_team} Adjustments:</span>
-                                            <span className="font-mono text-blue-400">
-                                              {pick.calculation_summary?.home_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.home_adjustments?.toFixed(3) || '0.000'}
-                                            </span>
-                                          </div>
-                                          <div className="flex justify-between font-semibold text-blue-400">
-                                            <span>{pick.home_team} Final Score:</span>
-                                            <span className="font-mono">{pick.projected_home_score}</span>
-                                          </div>
-                                          <div className="flex justify-between border-t border-zinc-700/50 pt-2">
-                                            <span className="text-orange-400">{pick.away_team} Adjustments:</span>
-                                            <span className="font-mono text-orange-400">
-                                              {pick.calculation_summary?.away_adjustments >= 0 ? '+' : ''}{pick.calculation_summary?.away_adjustments?.toFixed(3) || '0.000'}
-                                            </span>
-                                          </div>
-                                          <div className="flex justify-between font-semibold text-orange-400">
-                                            <span>{pick.away_team} Final Score:</span>
-                                            <span className="font-mono">{pick.projected_away_score}</span>
-                                          </div>
-                                        </div>
-                                        <p className="text-xs text-zinc-500 italic mt-3">
-                                          Adjustments come from weighted factors: offense, defense, form, injuries, home advantage, etc.
-                                        </p>
-                                      </div>
-
-                                      <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/30 rounded-lg p-4">
-                                        <h5 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">Confidence Breakdown</h5>
-                                        <div className="space-y-2 text-xs text-zinc-300">
-                                          <div className="flex justify-between">
-                                            <span className="text-zinc-500">Confidence Score:</span>
-                                            <span className="font-mono font-bold text-green-400">{pick.confidence_score}/10</span>
-                                          </div>
-                                          <div className="flex justify-between">
-                                            <span className="text-zinc-500">Strength:</span>
-                                            <span className="font-semibold">{pick.confidence_explanation?.strength || 'N/A'}</span>
-                                          </div>
-                                          <div className="border-t border-zinc-700/50 pt-2 space-y-1">
-                                            <p className="text-zinc-400">{pick.confidence_explanation?.reasoning || 'Based on edge and probabilities'}</p>
-                                          </div>
-                                          <div className="border-t border-zinc-700/50 pt-2 space-y-1">
-                                            <div className="flex justify-between">
-                                              <span className="text-zinc-500">Edge:</span>
-                                              <span className={`font-mono ${pick.edge_percentage > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                {pick.edge_percentage > 0 ? '+' : ''}{pick.edge_percentage}%
-                                              </span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                              <span className="text-zinc-500">Score Differential:</span>
-                                              <span className="font-mono">{Math.abs(pick.projected_home_score - pick.projected_away_score).toFixed(2)}</span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <p className="text-xs text-zinc-500 italic mt-3">
-                                          Confidence considers edge %, model probability strength, and score clarity
-                                        </p>
-                                      </div>
-                                    </div>
-
-                                    {/* All Outcome Probabilities */}
-                                    <div className="bg-zinc-800/50 border border-zinc-700/50 rounded p-4">
-                                      <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">All Outcome Probabilities</h5>
-                                      <div className="grid grid-cols-3 gap-4 text-xs">
-                                        <div className="text-center">
-                                          <p className="text-zinc-500 mb-2">HOME WIN</p>
-                                          <p className="font-mono text-sm text-blue-400 mb-1">{pick.all_probabilities?.home || 0}%</p>
-                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.home).toFixed(1)}%</p>
-                                        </div>
-                                        <div className="text-center">
-                                          <p className="text-zinc-500 mb-2">DRAW</p>
-                                          <p className="font-mono text-sm text-zinc-400 mb-1">{pick.all_probabilities?.draw || 0}%</p>
-                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.draw).toFixed(1)}%</p>
-                                        </div>
-                                        <div className="text-center">
-                                          <p className="text-zinc-500 mb-2">AWAY WIN</p>
-                                          <p className="font-mono text-sm text-orange-400 mb-1">{pick.all_probabilities?.away || 0}%</p>
-                                          <p className="text-zinc-600">vs Market: {(100 / pick.all_market_odds?.away).toFixed(1)}%</p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    
-                                    {/* Factor Breakdowns */}
-                                    <div>
-                                      <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">Factor-by-Factor Breakdown</h5>
-                                      <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
-                                          <FactorBreakdown 
-                                            breakdown={pick.home_breakdown} 
-                                            teamName={`${pick.home_team} (Home)`}
-                                          />
-                                        </div>
-                                        <div className="bg-zinc-800/30 border border-zinc-700/30 rounded-lg p-4">
-                                          <FactorBreakdown 
-                                            breakdown={pick.away_breakdown} 
-                                            teamName={`${pick.away_team} (Away)`}
-                                          />
-                                        </div>
-                                      </div>
-                                    </div>
-                                    
-                                    {/* Summary */}
-                                    <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
-                                      💡 <span className="font-semibold">How it works:</span> Each factor's contribution = (team rating - baseline) × factor weight × multiplier. 
-                                      Positive contributions increase the projected score. The final score determines outcome probabilities, 
-                                      which are compared to market odds to find value bets.
-                                    </div>
-                                      </>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
+            {/* Matchday Information */}
+            {matchdays.length > 0 && selectedModel && (
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-lg font-display text-zinc-100">Match Days</CardTitle>
+                  <CardDescription className="text-zinc-500">
+                    Generate picks for specific matchdays or view all matches organized by gameweek
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {matchdays
+                      .filter(md => !showOnlyUpcoming || md.upcoming_games > 0)
+                      .map((md) => (
+                        <Card 
+                          key={md.matchday} 
+                          className={`bg-zinc-800/50 border-zinc-700 cursor-pointer hover:border-green-500/50 transition-colors ${
+                            expandedMatchday === md.matchday ? 'border-green-500' : ''
+                          }`}
+                          onClick={() => setExpandedMatchday(expandedMatchday === md.matchday ? null : md.matchday)}
+                        >
+                          <CardContent className="p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs text-zinc-500 uppercase">MD {md.matchday}</p>
+                              {md.upcoming_games > 0 && (
+                                <Badge className="bg-green-500/20 text-green-400 border-green-500/40 text-xs px-1">
+                                  Live
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xl font-bold font-mono text-zinc-200">{md.total_games}</p>
+                            <p className="text-xs text-zinc-500 mt-1">
+                              {md.upcoming_games} upcoming
+                            </p>
+                            {md.upcoming_games > 0 && (
+                              <Button
+                                size="sm"
+                                className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white text-xs"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  generateMatchdayPicks(md.matchday, selectedModel);
+                                }}
+                                disabled={loading}
+                              >
+                                Generate Picks
+                              </Button>
                             )}
-                          </>
-                        ))}
-                      </tbody>
-                    </table>
+                          </CardContent>
+                        </Card>
+                      ))}
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {/* Next Matchday */}
-            {nextMatchday && groupedPicks[nextMatchday] && (
-              <Card className="bg-zinc-900/50 border-zinc-800 overflow-hidden">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-lg font-display text-zinc-100">
-                        Matchday {nextMatchday} <Badge className="ml-2 bg-blue-500/20 text-blue-400 border-blue-500/40 text-xs">Next</Badge>
-                      </CardTitle>
-                      <CardDescription className="text-zinc-500">
-                        {groupedPicks[nextMatchday].length} {groupedPicks[nextMatchday].length === 1 ? 'match' : 'matches'} • Sorted by confidence
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-zinc-800 bg-zinc-800/50">
-                          <th className="text-left p-4 text-xs text-zinc-500 uppercase tracking-wider">Match</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Projected</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Pick</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Odds</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Edge</th>
-                          <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Confidence</th>
-                          <th className="text-right p-4 text-xs text-zinc-500 uppercase tracking-wider">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {groupedPicks[nextMatchday].map((pick) => (
+            {/* Picks Display by Matchday */}
+            {picks.length > 0 ? (
+              <div className="space-y-4">
+                {Object.keys(groupedPicks)
+                  .sort((a, b) => parseInt(a) - parseInt(b))
+                  .filter(matchdayNum => {
+                    if (!showOnlyUpcoming) return true;
+                    // Check if this matchday has any upcoming games
+                    const matchdayInfo = matchdays.find(md => md.matchday === parseInt(matchdayNum));
+                    return matchdayInfo && matchdayInfo.upcoming_games > 0;
+                  })
+                  .map((matchdayNum) => {
+                    const matchdayPicks = groupedPicks[matchdayNum];
+                    const matchdayInfo = matchdays.find(md => md.matchday === parseInt(matchdayNum));
+                    const isExpanded = expandedMatchday === parseInt(matchdayNum);
+                    const isCurrent = matchdayInfo && matchdayInfo.upcoming_games > 0;
+
+                    return (
+                      <Card key={matchdayNum} className="bg-zinc-900/50 border-zinc-800 overflow-hidden">
+                        <CardHeader 
+                          className="cursor-pointer hover:bg-zinc-800/50 transition-colors"
+                          onClick={() => setExpandedMatchday(isExpanded ? null : parseInt(matchdayNum))}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <CardTitle className="text-lg font-display text-zinc-100">
+                                  Matchday {matchdayNum}
+                                </CardTitle>
+                                {isCurrent && (
+                                  <Badge className="bg-green-500/20 text-green-500 border-green-500/40 text-xs">
+                                    Current
+                                  </Badge>
+                                )}
+                              </div>
+                              <CardDescription className="text-zinc-500">
+                                {matchdayPicks.length} {matchdayPicks.length === 1 ? 'match' : 'matches'} • Sorted by confidence
+                              </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {matchdayInfo && matchdayInfo.upcoming_games > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-green-500 hover:text-green-400 hover:bg-green-500/10"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    generateMatchdayPicks(parseInt(matchdayNum), selectedModel);
+                                  }}
+                                  disabled={loading}
+                                >
+                                  <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                                  Regenerate
+                                </Button>
+                              )}
+                              {isExpanded ? (
+                                <ChevronDown className="w-5 h-5 text-zinc-500" />
+                              ) : (
+                                <ChevronRight className="w-5 h-5 text-zinc-500" />
+                              )}
+                            </div>
+                          </div>
+                        </CardHeader>
+                        
+                        {isExpanded && (
+                          <CardContent className="p-0">
+                            <div className="overflow-x-auto">
+                              <table className="w-full">
+                                <thead>
+                                  <tr className="border-b border-zinc-800 bg-zinc-800/50">
+                                    <th className="text-left p-4 text-xs text-zinc-500 uppercase tracking-wider">Match</th>
+                                    <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Projected</th>
+                                    <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Pick</th>
+                                    <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Odds</th>
+                                    <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Edge</th>
+                                    <th className="text-center p-4 text-xs text-zinc-500 uppercase tracking-wider">Confidence</th>
+                                    <th className="text-right p-4 text-xs text-zinc-500 uppercase tracking-wider">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {matchdayPicks.map((pick) => (
                           <>
                             <tr key={pick.id} className="border-b border-zinc-800/50 table-row-hover">
                               <td className="p-4">
@@ -1948,40 +1755,69 @@ function App() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="flex items-end gap-4">
-                  <div className="flex-1">
-                    <label className="text-sm text-zinc-400 mb-2 block">Select Model</label>
-                    <Select value={selectedSimModel} onValueChange={setSelectedSimModel}>
-                      <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="sim-model-select">
-                        <SelectValue placeholder="Choose a model to test" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-zinc-800 border-zinc-700">
-                        {models.map(m => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name} {m.model_type === 'preset' && '(Preset)'}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-end gap-4">
+                    <div className="flex-1">
+                      <label className="text-sm text-zinc-400 mb-2 block">Select Model</label>
+                      <Select value={selectedSimModel} onValueChange={setSelectedSimModel}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="sim-model-select">
+                          <SelectValue placeholder="Choose a model to test" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          {models.map(m => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name} {m.model_type === 'preset' && '(Preset)'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="flex-1">
+                      <label className="text-sm text-zinc-400 mb-2 block">Matchday Filter (Optional)</label>
+                      <Select value={selectedMatchdayForSim?.toString() || "all"} onValueChange={(v) => setSelectedMatchdayForSim(v === "all" ? null : parseInt(v))}>
+                        <SelectTrigger className="bg-zinc-800 border-zinc-700">
+                          <SelectValue placeholder="All matchdays" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-800 border-zinc-700">
+                          <SelectItem value="all">All Matchdays</SelectItem>
+                          {matchdays
+                            .filter(md => md.completed_games > 0)
+                            .map(md => (
+                              <SelectItem key={md.matchday} value={md.matchday.toString()}>
+                                Matchday {md.matchday} ({md.completed_games} completed)
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <Button
+                      className="bg-green-600 hover:bg-green-500 text-white font-bold"
+                      onClick={() => runSimulation(selectedSimModel, selectedMatchdayForSim)}
+                      disabled={!selectedSimModel || simulationLoading}
+                      data-testid="run-simulation-btn"
+                    >
+                      {simulationLoading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Running...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4 mr-2" />
+                          Run Simulation
+                        </>
+                      )}
+                    </Button>
                   </div>
-                  <Button
-                    className="bg-green-600 hover:bg-green-500 text-white font-bold"
-                    onClick={() => runSimulation(selectedSimModel)}
-                    disabled={!selectedSimModel || simulationLoading}
-                    data-testid="run-simulation-btn"
-                  >
-                    {simulationLoading ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Running...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4 mr-2" />
-                        Run Simulation
-                      </>
-                    )}
-                  </Button>
+                  
+                  {selectedMatchdayForSim && (
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <Info className="w-4 h-4" />
+                      <span>Simulating Matchday {selectedMatchdayForSim} only</span>
+                    </div>
+                  )}
                 </div>
 
                 {simulationResults && (
@@ -2094,63 +1930,91 @@ function App() {
                           {simulationResults.predictions.length} Games
                         </Badge>
                       </h3>
-                      <div className="space-y-2 max-h-96 overflow-y-auto">
-                        {simulationResults.predictions.map((pred, idx) => (
-                          <div
-                            key={idx}
-                            className={`p-3 rounded-sm border ${
-                              pred.correct
-                                ? 'bg-green-500/5 border-green-500/20'
-                                : 'bg-red-500/5 border-red-500/20'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3 flex-1">
-                                {pred.correct ? (
-                                  <CheckCircle className="w-4 h-4 text-green-500" />
-                                ) : (
-                                  <XCircle className="w-4 h-4 text-red-500" />
-                                )}
-                                <div>
-                                  <p className="text-sm font-medium text-zinc-200">
-                                    {pred.home_team} vs {pred.away_team}
-                                  </p>
-                                  <p className="text-xs text-zinc-500">
-                                    {pred.match_date}
-                                  </p>
+                      <div className="space-y-4 max-h-96 overflow-y-auto">
+                        {(() => {
+                          // Group predictions by matchday
+                          const grouped = {};
+                          simulationResults.predictions.forEach(pred => {
+                            const md = pred.matchday || 0;
+                            if (!grouped[md]) grouped[md] = [];
+                            grouped[md].push(pred);
+                          });
+                          
+                          return Object.keys(grouped)
+                            .sort((a, b) => parseInt(a) - parseInt(b))
+                            .map(matchdayNum => (
+                              <div key={matchdayNum} className="space-y-2">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h4 className="text-xs font-semibold text-zinc-400 uppercase">
+                                    Matchday {matchdayNum}
+                                  </h4>
+                                  <Badge variant="outline" className="text-xs">
+                                    {grouped[matchdayNum].length} matches
+                                  </Badge>
+                                  <span className="text-xs text-zinc-500">
+                                    • {grouped[matchdayNum].filter(p => p.correct).length} correct
+                                  </span>
                                 </div>
+                                
+                                {grouped[matchdayNum].map((pred, idx) => (
+                                  <div
+                                    key={idx}
+                                    className={`p-3 rounded-sm border ${
+                                      pred.correct
+                                        ? 'bg-green-500/5 border-green-500/20'
+                                        : 'bg-red-500/5 border-red-500/20'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-3 flex-1">
+                                        {pred.correct ? (
+                                          <CheckCircle className="w-4 h-4 text-green-500" />
+                                        ) : (
+                                          <XCircle className="w-4 h-4 text-red-500" />
+                                        )}
+                                        <div>
+                                          <p className="text-sm font-medium text-zinc-200">
+                                            {pred.home_team} vs {pred.away_team}
+                                          </p>
+                                          <p className="text-xs text-zinc-500">
+                                            {pred.match_date}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-4 text-xs">
+                                        <div className="text-center">
+                                          <p className="text-zinc-500">Predicted</p>
+                                          <p className="font-mono font-bold text-zinc-300 uppercase">
+                                            {pred.predicted_outcome}
+                                          </p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500">Actual</p>
+                                          <p className="font-mono font-bold text-zinc-300 uppercase">
+                                            {pred.actual_result}
+                                          </p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500">Score</p>
+                                          <p className="font-mono font-bold text-zinc-300">
+                                            {pred.home_score_actual}-{pred.away_score_actual}
+                                          </p>
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500">Conf</p>
+                                          <ConfidenceBadge score={pred.confidence} />
+                                        </div>
+                                        <div className="text-center">
+                                          <p className="text-zinc-500">Odds</p>
+                                          <p className="font-mono text-zinc-300">{pred.odds}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                              <div className="flex items-center gap-4 text-xs">
-                                <div className="text-center">
-                                  <p className="text-zinc-500">Predicted</p>
-                                  <p className="font-mono font-bold text-zinc-300 uppercase">
-                                    {pred.predicted_outcome}
-                                  </p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-zinc-500">Actual</p>
-                                  <p className="font-mono font-bold text-zinc-300 uppercase">
-                                    {pred.actual_result}
-                                  </p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-zinc-500">Score</p>
-                                  <p className="font-mono font-bold text-zinc-300">
-                                    {pred.home_score_actual}-{pred.away_score_actual}
-                                  </p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-zinc-500">Conf</p>
-                                  <ConfidenceBadge score={pred.confidence} />
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-zinc-500">Odds</p>
-                                  <p className="font-mono text-zinc-300">{pred.odds}</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                            ));
+                        })()}
                       </div>
                     </div>
                   </div>
