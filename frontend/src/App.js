@@ -1713,7 +1713,7 @@ function App() {
                                     
                                     {/* Summary */}
                                     <div className="text-xs text-zinc-500 italic border-t border-zinc-800 pt-4">
-                                      💡 <span className="font-semibold">How it works:</span> Each factor's contribution = (team rating - baseline) × factor weight × multiplier. 
+                                      💡 <span className="font-semibold">How it works:</span> Each factor&apos;s contribution = (team rating - baseline) × factor weight × multiplier. 
                                       Positive contributions increase the projected score. The final score determines outcome probabilities, 
                                       which are compared to market odds to find value bets.
                                     </div>
@@ -1729,11 +1729,13 @@ function App() {
                     </table>
                   </div>
                 </CardContent>
-              </Card>
-            )}
-          </div>
-            ) : (
-              <Card className="bg-zinc-900/50 border-zinc-800">
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    ) : (
+            <Card className="bg-zinc-900/50 border-zinc-800">
                 <CardContent className="p-12 text-center">
                   <Target className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
                   <p className="text-zinc-500">Select a model above to generate value picks</p>
