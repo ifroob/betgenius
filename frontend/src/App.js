@@ -24,7 +24,9 @@ import {
   XCircle,
   BarChart2,
   HelpCircle,
+  PieChart,
 } from "lucide-react";
+import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -200,6 +202,220 @@ const FactorBreakdown = ({ breakdown, teamName }) => {
           </div>
         );
       })}
+    </div>
+  );
+};
+
+// Data source information component
+const DataSourceInfo = ({ factor }) => {
+  const dataSourceMap = {
+    team_offense: {
+      source: "Football-Data.org API",
+      calculation: "Goals scored per match from historical data",
+      flow: "API → Historical Matches → Statistical Average"
+    },
+    team_defense: {
+      source: "Football-Data.org API",
+      calculation: "Goals conceded per match from historical data",
+      flow: "API → Historical Matches → Statistical Average"
+    },
+    recent_form: {
+      source: "Football-Data.org API",
+      calculation: "Win rate from last N matches",
+      flow: "API → Recent Match Results → Win Percentage"
+    },
+    injuries: {
+      source: "Derived from Form Data",
+      calculation: "Estimated from recent performance variance",
+      flow: "Form Variance → Squad Availability Estimate"
+    },
+    home_advantage: {
+      source: "Statistical Constant",
+      calculation: "Fixed home advantage boost/away penalty",
+      flow: "Home: +45% boost, Away: -35% penalty"
+    },
+    head_to_head: {
+      source: "Not Available (Neutral)",
+      calculation: "Historical matchup data not in current API",
+      flow: "Default: 50% neutral value"
+    },
+    rest_days: {
+      source: "Derived from Match Count",
+      calculation: "Estimated from total matches played",
+      flow: "More matches → Potentially less rest"
+    },
+    travel_distance: {
+      source: "Home/Away Status",
+      calculation: "Home: minimal, Away: distance-based fatigue",
+      flow: "Home: 95% fitness, Away: 65-85% based on team strength"
+    },
+    referee_influence: {
+      source: "Not Available (Neutral)",
+      calculation: "Referee data not in current API",
+      flow: "Default: 50% neutral value"
+    },
+    weather_conditions: {
+      source: "Not Available (Neutral)",
+      calculation: "Weather data not in current API",
+      flow: "Default: 50% neutral value"
+    },
+    motivation_level: {
+      source: "Derived from Win/Loss Record",
+      calculation: "Based on win-loss ratio and league position",
+      flow: "Win Rate → Motivation Score (40-100%)"
+    },
+    goals_differential: {
+      source: "Football-Data.org API",
+      calculation: "Goals For minus Goals Against from period",
+      flow: "API → Historical Matches → GF - GA"
+    },
+    win_rate: {
+      source: "Football-Data.org API",
+      calculation: "Wins divided by total matches from period",
+      flow: "API → Historical Matches → Win Percentage"
+    }
+  };
+  
+  const info = dataSourceMap[factor] || {
+    source: "Unknown",
+    calculation: "No information available",
+    flow: "N/A"
+  };
+  
+  return (
+    <div className="text-xs space-y-1 p-2 bg-zinc-800/30 rounded border border-zinc-700/30">
+      <div>
+        <span className="text-zinc-500">Source:</span>
+        <span className="ml-2 text-zinc-300">{info.source}</span>
+      </div>
+      <div>
+        <span className="text-zinc-500">Calculation:</span>
+        <span className="ml-2 text-zinc-300">{info.calculation}</span>
+      </div>
+      <div>
+        <span className="text-zinc-500">Data Flow:</span>
+        <span className="ml-2 text-green-400 font-mono text-[10px]">{info.flow}</span>
+      </div>
+    </div>
+  );
+};
+
+// Weights Pie Chart Visualization Component
+const WeightsVisualization = ({ weights }) => {
+  const [hoveredFactor, setHoveredFactor] = useState(null);
+  
+  const COLORS = [
+    '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b',
+    '#06b6d4', '#14b8a6', '#84cc16', '#f97316', '#6366f1',
+    '#a855f7', '#ef4444', '#22c55e'
+  ];
+  
+  const factorNames = {
+    team_offense: "Offense",
+    team_defense: "Defense",
+    recent_form: "Recent Form",
+    injuries: "Injuries",
+    home_advantage: "Home Advantage",
+    head_to_head: "Head-to-Head",
+    rest_days: "Rest Days",
+    travel_distance: "Travel",
+    referee_influence: "Referee",
+    weather_conditions: "Weather",
+    motivation_level: "Motivation",
+    goals_differential: "Goal Diff",
+    win_rate: "Win Rate"
+  };
+  
+  // Filter out period settings and zero values
+  const chartData = Object.entries(weights)
+    .filter(([key, value]) => !key.endsWith('_period') && value > 0)
+    .map(([key, value]) => ({
+      name: factorNames[key] || key,
+      value: value,
+      fullKey: key
+    }))
+    .sort((a, b) => b.value - a.value);
+  
+  if (chartData.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-zinc-500">
+        <p>No weights assigned yet</p>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 mb-2">
+        <PieChart className="w-4 h-4 text-green-500" />
+        <h4 className="text-sm font-semibold text-zinc-300">Factor Weight Distribution</h4>
+      </div>
+      
+      <div className="grid md:grid-cols-2 gap-4">
+        {/* Pie Chart */}
+        <div className="bg-zinc-800/30 rounded-lg p-4 border border-zinc-700/30">
+          <ResponsiveContainer width="100%" height={250}>
+            <RechartsPieChart>
+              <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                outerRadius={80}
+                fill="#8884d8"
+                dataKey="value"
+                onMouseEnter={(_, index) => setHoveredFactor(chartData[index].fullKey)}
+                onMouseLeave={() => setHoveredFactor(null)}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={COLORS[index % COLORS.length]}
+                    opacity={hoveredFactor && hoveredFactor !== entry.fullKey ? 0.3 : 1}
+                  />
+                ))}
+              </Pie>
+              <RechartsTooltip 
+                contentStyle={{ 
+                  backgroundColor: '#18181b', 
+                  border: '1px solid #3f3f46',
+                  borderRadius: '4px',
+                  color: '#e4e4e7'
+                }}
+              />
+            </RechartsPieChart>
+          </ResponsiveContainer>
+        </div>
+        
+        {/* Factor List with Data Sources */}
+        <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+          {chartData.map((item, index) => (
+            <div 
+              key={item.fullKey}
+              className={`p-2 rounded border transition-all ${
+                hoveredFactor === item.fullKey 
+                  ? 'bg-zinc-700/50 border-green-500/50' 
+                  : 'bg-zinc-800/30 border-zinc-700/30'
+              }`}
+              onMouseEnter={() => setHoveredFactor(item.fullKey)}
+              onMouseLeave={() => setHoveredFactor(null)}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-3 h-3 rounded-full" 
+                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                  />
+                  <span className="text-sm font-medium text-zinc-200">{item.name}</span>
+                </div>
+                <span className="text-sm font-mono font-bold text-green-400">{item.value}%</span>
+              </div>
+              <DataSourceInfo factor={item.fullKey} />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
@@ -467,21 +683,30 @@ function App() {
   // Model builder state
   const [newModelName, setNewModelName] = useState("");
   const [weights, setWeights] = useState({
-    team_offense: 12,
-    team_defense: 12,
-    recent_form: 12,
-    injuries: 10,
+    team_offense: 10,
+    team_defense: 10,
+    recent_form: 10,
+    injuries: 8,
     home_advantage: 10,
-    head_to_head: 10,
-    rest_days: 8,
-    travel_distance: 8,
-    referee_influence: 8,
+    head_to_head: 8,
+    rest_days: 7,
+    travel_distance: 7,
+    referee_influence: 5,
     weather_conditions: 5,
     motivation_level: 5,
+    goals_differential: 8,
+    win_rate: 7,
     // Period settings for time-based factors
     form_period: 10,
     goals_period: 10,
     win_rate_period: 10
+  });
+  
+  // Matchday range state
+  const [matchdayRange, setMatchdayRange] = useState({
+    min_matchday: 1,
+    max_matchday: 38,
+    available_matchdays: 0
   });
   
   // Expanded pick reasoning state
@@ -582,7 +807,8 @@ function App() {
   useEffect(() => {
     fetchData();
     fetchMatchdays();
-  }, [fetchData]);
+    fetchMatchdayRange();
+  }, [fetchData, fetchMatchdays, fetchMatchdayRange]);
 
   // Generate picks for selected model
   const generatePicks = async (modelId) => {
@@ -639,6 +865,17 @@ function App() {
       toast.error("Please enter a model name");
       return;
     }
+    
+    if (totalWeights > 100) {
+      toast.error(`Total weight cannot exceed 100% (currently ${totalWeights}%)`);
+      return;
+    }
+    
+    if (totalWeights === 0) {
+      toast.error("Please assign at least some weight to factors");
+      return;
+    }
+    
     try {
       await axios.post(`${API}/models`, {
         name: newModelName,
@@ -648,9 +885,9 @@ function App() {
       toast.success("Model created!");
       setNewModelName("");
       setWeights({ 
-        team_offense: 12, team_defense: 12, recent_form: 12, injuries: 10, home_advantage: 10,
-        head_to_head: 10, rest_days: 8, travel_distance: 8, referee_influence: 8,
-        weather_conditions: 5, motivation_level: 5,
+        team_offense: 10, team_defense: 10, recent_form: 10, injuries: 8, home_advantage: 10,
+        head_to_head: 8, rest_days: 7, travel_distance: 7, referee_influence: 5,
+        weather_conditions: 5, motivation_level: 5, goals_differential: 8, win_rate: 7,
         form_period: 10, goals_period: 10, win_rate_period: 10
       });
       fetchData();
@@ -744,7 +981,28 @@ function App() {
     }
   };
 
-  const totalWeights = Object.values(weights).reduce((a, b) => a + b, 0);
+  // Calculate total weights (excluding period settings)
+  const totalWeights = Object.entries(weights)
+    .filter(([key]) => !key.endsWith('_period'))
+    .reduce((sum, [, value]) => sum + value, 0);
+  
+  // Fetch matchday range
+  const fetchMatchdayRange = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/matchday-range`);
+      setMatchdayRange(res.data);
+    } catch (err) {
+      console.error("Error fetching matchday range:", err);
+    }
+  }, []);
+  
+  // Check if total weight exceeds 100
+  const isWeightExceeded = totalWeights > 100;
+  const weightWarningMessage = isWeightExceeded 
+    ? `Total weight is ${totalWeights}% (exceeds 100%)` 
+    : totalWeights === 100 
+    ? "Perfect! Total weight is 100%" 
+    : `${100 - totalWeights}% remaining`;
 
   // Helper function to group picks by matchday
   const groupPicksByMatchday = () => {
@@ -1116,6 +1374,18 @@ function App() {
                       value={weights.motivation_level}
                       onChange={(v) => setWeights(w => ({ ...w, motivation_level: v }))}
                     />
+                    <WeightSlider
+                      label="Goals Differential"
+                      description="Goal difference indicator"
+                      value={weights.goals_differential}
+                      onChange={(v) => setWeights(w => ({ ...w, goals_differential: v }))}
+                    />
+                    <WeightSlider
+                      label="Win Rate"
+                      description="Historical success rate"
+                      value={weights.win_rate}
+                      onChange={(v) => setWeights(w => ({ ...w, win_rate: v }))}
+                    />
                     
                     <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mt-6 mb-2 flex items-center gap-2">
                       <div className="h-px flex-1 bg-orange-500/30"></div>
@@ -1125,84 +1395,167 @@ function App() {
                     <div className="space-y-4 p-4 bg-zinc-800/30 rounded border border-zinc-700/30">
                       <p className="text-xs text-zinc-400 mb-3">
                         Customize how many recent matches to analyze for time-sensitive factors
+                        {matchdayRange.available_matchdays > 0 && (
+                          <span className="block mt-1 text-green-400">
+                            Available data: {matchdayRange.available_matchdays} matchdays
+                          </span>
+                        )}
                       </p>
                       
                       <div className="space-y-2">
                         <label className="text-sm text-zinc-300 flex items-center gap-2">
                           <span>Recent Form Period</span>
-                          <span className="text-xs text-zinc-500">(Last N matches)</span>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-zinc-500 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-zinc-800 border-zinc-700">
+                                <p className="text-xs max-w-xs">
+                                  Number of recent matches to analyze for form rating. 
+                                  Range: 1-{matchdayRange.max_matchday} matchdays
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </label>
-                        <Select 
-                          value={weights.form_period.toString()} 
-                          onValueChange={(v) => setWeights(w => ({ ...w, form_period: parseInt(v) }))}
-                        >
-                          <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="form-period-select">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-zinc-800 border-zinc-700">
-                            <SelectItem value="5">Last 5 matches</SelectItem>
-                            <SelectItem value="10">Last 10 matches</SelectItem>
-                            <SelectItem value="15">Last 15 matches</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min="1"
+                            max={matchdayRange.max_matchday}
+                            value={weights.form_period}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 1;
+                              setWeights(w => ({ 
+                                ...w, 
+                                form_period: Math.min(Math.max(val, 1), matchdayRange.max_matchday) 
+                              }));
+                            }}
+                            className="bg-zinc-800 border-zinc-700 focus:border-green-500"
+                            data-testid="form-period-input"
+                          />
+                          <span className="text-xs text-zinc-500 whitespace-nowrap">matches</span>
+                        </div>
                       </div>
                       
                       <div className="space-y-2">
                         <label className="text-sm text-zinc-300 flex items-center gap-2">
                           <span>Goals Analysis Period</span>
-                          <span className="text-xs text-zinc-500">(Goals For/Against)</span>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-zinc-500 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-zinc-800 border-zinc-700">
+                                <p className="text-xs max-w-xs">
+                                  Number of matches to analyze for goals scored/conceded. 
+                                  Range: 1-{matchdayRange.max_matchday} matchdays
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </label>
-                        <Select 
-                          value={weights.goals_period.toString()} 
-                          onValueChange={(v) => setWeights(w => ({ ...w, goals_period: parseInt(v) }))}
-                        >
-                          <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="goals-period-select">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-zinc-800 border-zinc-700">
-                            <SelectItem value="5">Last 5 matches</SelectItem>
-                            <SelectItem value="10">Last 10 matches</SelectItem>
-                            <SelectItem value="15">Last 15 matches</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min="1"
+                            max={matchdayRange.max_matchday}
+                            value={weights.goals_period}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 1;
+                              setWeights(w => ({ 
+                                ...w, 
+                                goals_period: Math.min(Math.max(val, 1), matchdayRange.max_matchday) 
+                              }));
+                            }}
+                            className="bg-zinc-800 border-zinc-700 focus:border-green-500"
+                            data-testid="goals-period-input"
+                          />
+                          <span className="text-xs text-zinc-500 whitespace-nowrap">matches</span>
+                        </div>
                       </div>
                       
                       <div className="space-y-2">
                         <label className="text-sm text-zinc-300 flex items-center gap-2">
                           <span>Win Rate Period</span>
-                          <span className="text-xs text-zinc-500">(Historical success)</span>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-zinc-500 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-zinc-800 border-zinc-700">
+                                <p className="text-xs max-w-xs">
+                                  Number of matches to analyze for win rate calculation. 
+                                  Range: 1-{matchdayRange.max_matchday} matchdays
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </label>
-                        <Select 
-                          value={weights.win_rate_period.toString()} 
-                          onValueChange={(v) => setWeights(w => ({ ...w, win_rate_period: parseInt(v) }))}
-                        >
-                          <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="win-rate-period-select">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-zinc-800 border-zinc-700">
-                            <SelectItem value="5">Last 5 matches</SelectItem>
-                            <SelectItem value="10">Last 10 matches</SelectItem>
-                            <SelectItem value="15">Last 15 matches</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min="1"
+                            max={matchdayRange.max_matchday}
+                            value={weights.win_rate_period}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 1;
+                              setWeights(w => ({ 
+                                ...w, 
+                                win_rate_period: Math.min(Math.max(val, 1), matchdayRange.max_matchday) 
+                              }));
+                            }}
+                            className="bg-zinc-800 border-zinc-700 focus:border-green-500"
+                            data-testid="win-rate-period-input"
+                          />
+                          <span className="text-xs text-zinc-500 whitespace-nowrap">matches</span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-sm border border-zinc-700/50">
-                    <span className="text-sm text-zinc-400">Total Weight</span>
-                    <span className={`font-mono font-bold ${totalWeights === 100 ? 'text-green-500' : 'text-yellow-500'}`}>
+                  {/* Weights Visualization */}
+                  <Card className="bg-zinc-800/50 border-zinc-700">
+                    <CardContent className="p-4">
+                      <WeightsVisualization weights={weights} />
+                    </CardContent>
+                  </Card>
+
+                  <div className={`flex items-center justify-between p-3 rounded-sm border ${
+                    isWeightExceeded 
+                      ? 'bg-red-500/10 border-red-500/50' 
+                      : totalWeights === 100 
+                      ? 'bg-green-500/10 border-green-500/50' 
+                      : 'bg-zinc-800/50 border-zinc-700/50'
+                  }`}>
+                    <div>
+                      <span className="text-sm text-zinc-400">Total Weight</span>
+                      <p className="text-xs text-zinc-500 mt-0.5">{weightWarningMessage}</p>
+                    </div>
+                    <span className={`font-mono font-bold text-lg ${
+                      isWeightExceeded 
+                        ? 'text-red-500' 
+                        : totalWeights === 100 
+                        ? 'text-green-500' 
+                        : 'text-yellow-500'
+                    }`}>
                       {totalWeights}%
                     </span>
                   </div>
 
                   <Button
-                    className="w-full bg-green-600 hover:bg-green-500 text-white font-bold uppercase tracking-wider"
+                    className={`w-full font-bold uppercase tracking-wider ${
+                      isWeightExceeded 
+                        ? 'bg-red-600 hover:bg-red-500 cursor-not-allowed' 
+                        : 'bg-green-600 hover:bg-green-500'
+                    } text-white`}
                     onClick={createModel}
+                    disabled={isWeightExceeded}
                     data-testid="create-model-btn"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Create Model
+                    {isWeightExceeded ? 'Weight Exceeds 100%' : 'Create Model'}
                   </Button>
                 </CardContent>
               </Card>

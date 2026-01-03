@@ -1550,6 +1550,40 @@ async def get_team_details(team_name: str):
         }
     }
 
+@api_router.get("/matchday-range")
+async def get_matchday_range():
+    """Get available matchday range from historical data"""
+    if not HISTORICAL_GAMES:
+        return {
+            "min_matchday": 1,
+            "max_matchday": 38,
+            "available_matchdays": 0,
+            "message": "No historical data available yet"
+        }
+    
+    matchdays = [g.get("matchday", 0) for g in HISTORICAL_GAMES if g.get("matchday")]
+    
+    if not matchdays:
+        return {
+            "min_matchday": 1,
+            "max_matchday": 38,
+            "available_matchdays": 0,
+            "message": "No matchday data available"
+        }
+    
+    min_matchday = min(matchdays)
+    max_matchday = max(matchdays)
+    available_matchdays = len(set(matchdays))
+    
+    logger.info(f"📊 Matchday range: {min_matchday} to {max_matchday} ({available_matchdays} matchdays)")
+    
+    return {
+        "min_matchday": min_matchday,
+        "max_matchday": max_matchday,
+        "available_matchdays": available_matchdays,
+        "season": HISTORICAL_GAMES[0].get("season") if HISTORICAL_GAMES else None
+    }
+
 @api_router.post("/refresh-data")
 async def refresh_data():
     """Fetch fresh data from API"""
