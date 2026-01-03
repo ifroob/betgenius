@@ -795,14 +795,24 @@ function App() {
   };
 
   // Fetch matchdays
-  const fetchMatchdays = async () => {
+  const fetchMatchdays = useCallback(async () => {
     try {
       const res = await axios.get(`${API}/matchdays`);
       setMatchdays(res.data.matchdays || []);
     } catch (err) {
       console.error("Error fetching matchdays:", err);
     }
-  };
+  }, []);
+  
+  // Fetch matchday range
+  const fetchMatchdayRange = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/matchday-range`);
+      setMatchdayRange(res.data);
+    } catch (err) {
+      console.error("Error fetching matchday range:", err);
+    }
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -985,16 +995,6 @@ function App() {
   const totalWeights = Object.entries(weights)
     .filter(([key]) => !key.endsWith('_period'))
     .reduce((sum, [, value]) => sum + value, 0);
-  
-  // Fetch matchday range
-  const fetchMatchdayRange = useCallback(async () => {
-    try {
-      const res = await axios.get(`${API}/matchday-range`);
-      setMatchdayRange(res.data);
-    } catch (err) {
-      console.error("Error fetching matchday range:", err);
-    }
-  }, []);
   
   // Check if total weight exceeds 100
   const isWeightExceeded = totalWeights > 100;
