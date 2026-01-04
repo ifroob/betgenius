@@ -143,6 +143,7 @@ class JournalEntryCreate(BaseModel):
     pick_id: str
     stake: float
     odds_taken: float
+    predicted_outcome: str  # home, away, or draw
 
 class SettleBetRequest(BaseModel):
     result: str
@@ -1927,10 +1928,18 @@ async def get_journal():
 @api_router.post("/journal", status_code=201)
 async def create_journal_entry(entry_input: JournalEntryCreate):
     """Add a pick to the journal"""
-    parts = entry_input.pick_id.split("-")
+    # Pick ID format: pick-{model_id}-{game_id}
+    # Model ID can contain hyphens, so we need to find the game_id differently
+    # Game IDs start with "api-" so we can search for that
+    pick_id = entry_input.pick_id
     
-    # Find the game from pick_id
-    game_id = "-".join(parts[2:])  # Everything after "pick-{model_id}-"
+    # Find the game_id by looking for "api-" pattern
+    api_index = pick_id.find("-api-")
+    if api_index == -1:
+        raise HTTPException(status_code=400, detail="Invalid pick ID format")
+    
+    game_id = pick_id[api_index + 1:]  # Get everything after the first "-" before "api-"
+    model_id = pick_id[5:api_index]  # Everything between "pick-" and "-api-"
     
     game = None
     for g in API_GAMES:
@@ -1941,7 +1950,7 @@ async def create_journal_entry(entry_input: JournalEntryCreate):
     if not game:
         raise HTTPException(status_code=400, detail="Invalid pick")
     
-    model_id = parts[1]
+    # Get model name
     model_name = "Custom Model"
     for p in PRESET_MODELS:
         if p["id"] == model_id:
@@ -1959,7 +1968,7 @@ async def create_journal_entry(entry_input: JournalEntryCreate):
         home_team=game["home"],
         away_team=game["away"],
         match_date=game["date"],
-        predicted_outcome="home",
+        predicted_outcome=entry_input.predicted_outcome,
         stake=entry_input.stake,
         odds_taken=entry_input.odds_taken
     )

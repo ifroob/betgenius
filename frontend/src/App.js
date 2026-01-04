@@ -927,7 +927,8 @@ function App() {
       await axios.post(`${API}/journal`, {
         pick_id: selectedPick.id,
         stake: parseFloat(betStake),
-        odds_taken: parseFloat(betOdds)
+        odds_taken: parseFloat(betOdds),
+        predicted_outcome: selectedPick.predicted_outcome
       });
       toast.success("Bet added to journal!");
       setShowAddBetDialog(false);
