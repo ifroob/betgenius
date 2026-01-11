@@ -683,23 +683,11 @@ function App() {
   // Model builder state
   const [newModelName, setNewModelName] = useState("");
   const [weights, setWeights] = useState({
-    team_offense: 10,
-    team_defense: 10,
-    recent_form: 10,
-    injuries: 8,
-    home_advantage: 10,
-    head_to_head: 8,
-    rest_days: 7,
-    travel_distance: 7,
-    referee_influence: 5,
-    weather_conditions: 5,
-    motivation_level: 5,
-    goals_differential: 8,
-    win_rate: 7,
-    // Period settings for time-based factors
-    form_period: 10,
-    goals_period: 10,
-    win_rate_period: 10
+    team_offense: 0,
+    team_defense: 0,
+    recent_form: 0,
+    injuries: 0,
+    home_advantage: 0
   });
   
   // Matchday range state
@@ -895,15 +883,28 @@ function App() {
       toast.success("Model created!");
       setNewModelName("");
       setWeights({ 
-        team_offense: 10, team_defense: 10, recent_form: 10, injuries: 8, home_advantage: 10,
-        head_to_head: 8, rest_days: 7, travel_distance: 7, referee_influence: 5,
-        weather_conditions: 5, motivation_level: 5, goals_differential: 8, win_rate: 7,
-        form_period: 10, goals_period: 10, win_rate_period: 10
+        team_offense: 0,
+        team_defense: 0,
+        recent_form: 0,
+        injuries: 0,
+        home_advantage: 0
       });
       fetchData();
     } catch (err) {
       toast.error("Failed to create model");
     }
+  };
+
+  // Reset all factors to 0
+  const resetAllFactors = () => {
+    setWeights({
+      team_offense: 0,
+      team_defense: 0,
+      recent_form: 0,
+      injuries: 0,
+      home_advantage: 0
+    });
+    toast.success("All factors reset to 0%");
   };
 
   // Delete model
@@ -1297,6 +1298,17 @@ function App() {
                     />
                   </div>
 
+                  {/* Reset All Factors Button */}
+                  <Button
+                    variant="outline"
+                    className="w-full border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    onClick={resetAllFactors}
+                    data-testid="reset-all-factors-btn"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    RESET ALL FACTORS
+                  </Button>
+
                   <div className="space-y-5">
                     <div className="text-xs font-semibold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-2">
                       <div className="h-px flex-1 bg-green-500/30"></div>
@@ -1333,187 +1345,6 @@ function App() {
                       value={weights.home_advantage}
                       onChange={(v) => setWeights(w => ({ ...w, home_advantage: v }))}
                     />
-                    
-                    <div className="text-xs font-semibold text-blue-500 uppercase tracking-wider mt-6 mb-2 flex items-center gap-2">
-                      <div className="h-px flex-1 bg-blue-500/30"></div>
-                      Advanced Factors
-                      <div className="h-px flex-1 bg-blue-500/30"></div>
-                    </div>
-                    <WeightSlider
-                      label="Head-to-Head"
-                      description="Historical matchup record"
-                      value={weights.head_to_head}
-                      onChange={(v) => setWeights(w => ({ ...w, head_to_head: v }))}
-                    />
-                    <WeightSlider
-                      label="Rest Days"
-                      description="Recovery time between matches"
-                      value={weights.rest_days}
-                      onChange={(v) => setWeights(w => ({ ...w, rest_days: v }))}
-                    />
-                    <WeightSlider
-                      label="Travel Distance"
-                      description="Away team fatigue"
-                      value={weights.travel_distance}
-                      onChange={(v) => setWeights(w => ({ ...w, travel_distance: v }))}
-                    />
-                    <WeightSlider
-                      label="Referee Influence"
-                      description="Officiating patterns"
-                      value={weights.referee_influence}
-                      onChange={(v) => setWeights(w => ({ ...w, referee_influence: v }))}
-                    />
-                    <WeightSlider
-                      label="Weather Conditions"
-                      description="Match day conditions"
-                      value={weights.weather_conditions}
-                      onChange={(v) => setWeights(w => ({ ...w, weather_conditions: v }))}
-                    />
-                    <WeightSlider
-                      label="Motivation Level"
-                      description="League position/objectives"
-                      value={weights.motivation_level}
-                      onChange={(v) => setWeights(w => ({ ...w, motivation_level: v }))}
-                    />
-                    <WeightSlider
-                      label="Goals Differential"
-                      description="Goal difference indicator"
-                      value={weights.goals_differential}
-                      onChange={(v) => setWeights(w => ({ ...w, goals_differential: v }))}
-                    />
-                    <WeightSlider
-                      label="Win Rate"
-                      description="Historical success rate"
-                      value={weights.win_rate}
-                      onChange={(v) => setWeights(w => ({ ...w, win_rate: v }))}
-                    />
-                    
-                    <div className="text-xs font-semibold text-orange-500 uppercase tracking-wider mt-6 mb-2 flex items-center gap-2">
-                      <div className="h-px flex-1 bg-orange-500/30"></div>
-                      Period Customization
-                      <div className="h-px flex-1 bg-orange-500/30"></div>
-                    </div>
-                    <div className="space-y-4 p-4 bg-zinc-800/30 rounded border border-zinc-700/30">
-                      <p className="text-xs text-zinc-400 mb-3">
-                        Customize how many recent matches to analyze for time-sensitive factors
-                        {matchdayRange.available_matchdays > 0 && (
-                          <span className="block mt-1 text-green-400">
-                            Available data: {matchdayRange.available_matchdays} matchdays
-                          </span>
-                        )}
-                      </p>
-                      
-                      <div className="space-y-2">
-                        <label className="text-sm text-zinc-300 flex items-center gap-2">
-                          <span>Recent Form Period</span>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="w-3 h-3 text-zinc-500 cursor-help" />
-                              </TooltipTrigger>
-                              <TooltipContent className="bg-zinc-800 border-zinc-700">
-                                <p className="text-xs max-w-xs">
-                                  Number of recent matches to analyze for form rating. 
-                                  Range: 1-{matchdayRange.max_matchday} matchdays
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min="1"
-                            max={matchdayRange.max_matchday}
-                            value={weights.form_period}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value) || 1;
-                              setWeights(w => ({ 
-                                ...w, 
-                                form_period: Math.min(Math.max(val, 1), matchdayRange.max_matchday) 
-                              }));
-                            }}
-                            className="bg-zinc-800 border-zinc-700 focus:border-green-500"
-                            data-testid="form-period-input"
-                          />
-                          <span className="text-xs text-zinc-500 whitespace-nowrap">matches</span>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <label className="text-sm text-zinc-300 flex items-center gap-2">
-                          <span>Goals Analysis Period</span>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="w-3 h-3 text-zinc-500 cursor-help" />
-                              </TooltipTrigger>
-                              <TooltipContent className="bg-zinc-800 border-zinc-700">
-                                <p className="text-xs max-w-xs">
-                                  Number of matches to analyze for goals scored/conceded. 
-                                  Range: 1-{matchdayRange.max_matchday} matchdays
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min="1"
-                            max={matchdayRange.max_matchday}
-                            value={weights.goals_period}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value) || 1;
-                              setWeights(w => ({ 
-                                ...w, 
-                                goals_period: Math.min(Math.max(val, 1), matchdayRange.max_matchday) 
-                              }));
-                            }}
-                            className="bg-zinc-800 border-zinc-700 focus:border-green-500"
-                            data-testid="goals-period-input"
-                          />
-                          <span className="text-xs text-zinc-500 whitespace-nowrap">matches</span>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <label className="text-sm text-zinc-300 flex items-center gap-2">
-                          <span>Win Rate Period</span>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="w-3 h-3 text-zinc-500 cursor-help" />
-                              </TooltipTrigger>
-                              <TooltipContent className="bg-zinc-800 border-zinc-700">
-                                <p className="text-xs max-w-xs">
-                                  Number of matches to analyze for win rate calculation. 
-                                  Range: 1-{matchdayRange.max_matchday} matchdays
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min="1"
-                            max={matchdayRange.max_matchday}
-                            value={weights.win_rate_period}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value) || 1;
-                              setWeights(w => ({ 
-                                ...w, 
-                                win_rate_period: Math.min(Math.max(val, 1), matchdayRange.max_matchday) 
-                              }));
-                            }}
-                            className="bg-zinc-800 border-zinc-700 focus:border-green-500"
-                            data-testid="win-rate-period-input"
-                          />
-                          <span className="text-xs text-zinc-500 whitespace-nowrap">matches</span>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   {/* Weights Visualization */}

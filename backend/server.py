@@ -924,7 +924,7 @@ async def fetch_epl_fixtures_from_api():
             
             # Store data
             API_GAMES = upcoming_matches[:15]
-            HISTORICAL_GAMES = finished_matches[-30:]
+            HISTORICAL_GAMES = finished_matches[-150:]  # Store up to 150 matches to support models requiring 5, 10, 15+ match lookbacks
             
             logger.info(f"✅ Updated API_GAMES with {len(API_GAMES)} upcoming matches")
             logger.info(f"✅ Updated HISTORICAL_GAMES with {len(HISTORICAL_GAMES)} completed matches")
